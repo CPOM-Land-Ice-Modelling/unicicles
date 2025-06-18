@@ -137,7 +137,6 @@ def extract_bisicles_calving(hdf5_input, region="GrIS"):
 
     return calving, xl_2d, yl_2d, x_1d, y_1d
 
-
 def construct_CF(field, lon, lat, x_1d, y_1d):
 
     import cf
@@ -148,22 +147,21 @@ def construct_CF(field, lon, lat, x_1d, y_1d):
     """
     field_CF = cf.Field()
 
-    dimx = cf.DimensionCoordinate(data=cf.Data(x_1d, 'm'))
-    field_CF.set_construct(cf.DomainAxis(size=len(x_1d)), key="X")
-    field_CF.set_construct(dimx, axes="X")
+    dimx = cf.DimensionCoordinate(data=cf.Data(x_1d, 'm'),properties={'standard_name':'projection_x_coordinate','axis':'X'})
+    X = field_CF.set_construct(cf.DomainAxis(size=len(x_1d)))
+    keyX = field_CF.set_construct(dimx, axes=X)
 
-    dimy = cf.DimensionCoordinate(data=cf.Data(y_1d, 'm'))
-    field_CF.set_construct(cf.DomainAxis(size=len(y_1d)), key="Y")
-    field_CF.set_construct(dimy, axes="Y")
-    lats = cf.AuxiliaryCoordinate(data=cf.Data(lat, 'degrees_north'),
-                                  properties={'standard_name': 'latitude'})
-    field_CF.set_construct(lats, axes=('Y', 'X'))
-    lons = cf.AuxiliaryCoordinate(data=cf.Data(lon, 'degrees_east'),
-                                  properties={'standard_name': 'longitude'})
-    field_CF.set_construct(lons, axes=('Y', 'X'))
+    dimy = cf.DimensionCoordinate(data=cf.Data(y_1d, 'm'),properties={'standard_name':'projection_y_coordinate','axis':'Y'})
+    Y = field_CF.set_construct(cf.DomainAxis(size=len(y_1d)))
+    keyY = field_CF.set_construct(dimy, axes=Y)
+
+    lats = cf.AuxiliaryCoordinate(data=cf.Data(lat, 'degrees_north'), properties={'standard_name': 'latitude'})
+    field_CF.set_construct(lats, axes=(Y, X))
+    lons = cf.AuxiliaryCoordinate(data=cf.Data(lon, 'degrees_east'), properties={'standard_name': 'longitude'})
+    field_CF.set_construct(lons, axes=(Y, X))
 
     field_ma = np.ma.masked_equal(field, 0.)
-    field_CF.set_data(cf.Data(field_ma, units='m'), axes=('Y', 'X'))
+    field_CF.set_data(cf.Data(field_ma, units='m'), axes=(Y, X))
     field_CF.set_property('_FillValue', -99.)
 
     return field_CF
@@ -225,26 +223,22 @@ def regrid_to_NEMO(field_CF, nemo_ncgridfile):
     # THIS MAY CHANGE IN FUTURE RELEASES?
     # Multiply field by the cell areas here, on the nice regular grid, and do a
     # simple nearest-neighbour point map to the orca grid
-    #python3 cf returns lon/lat with the old syntax of asking for X and Y, we want to work
-    #out cell lengths here
-    key_dy=list(field_CF.dimension_coordinates().keys())[0]
-    key_dx=list(field_CF.dimension_coordinates().keys())[1]
 
-    dx = field_CF.dimension_coordinate(key_dx).array[1] - field_CF.dimension_coordinate(key_dx).array[0]
-    dy = field_CF.dimension_coordinate(key_dy).array[1] - field_CF.dimension_coordinate(key_dy).array[0]
+    dx = field_CF.dimension_coordinate('X').array[1]-field_CF.dimension_coordinate('X').array[0]
+    dy = field_CF.dimension_coordinate('Y').array[1]-field_CF.dimension_coordinate('Y').array[0]
     field_CF = field_CF * dx * dy
 
-    #masking in python3 cf is screwing up the regrid
-    f1=np.asarray(field_CF.array)
-    field_CF.set_data(cf.Data(f1))
-
+    #masking in python3 cf is screwing up the dtos regrid
+    field_CF = field_CF.copy()
+    field_CF.hardmask = False
+    field_CF.where(field_CF.mask, 0, inplace=True)
+    
+    #if this nemo gridfile had a land-masked array, newer cf-python(>3.14?)/esmf would be able to 
+    #regrid directly to the nearest valid open ocean point and reroute_calving_to_ocean would 
+    #be unnecessary
     g = cf.read(nemo_ncgridfile)[0]
-    # Different versions of cf-python seem to label (and identify) our too-simple
-    # constructed field axes in different ways. Adding explicit identifiers
-    # to src_axes for the cf version you have seems to be the way.
-    # src_axes=['latitude','longitude']?
-    field_REGRID = field_CF.regrids(g, dst_cyclic=True, method='nearest_dtos',
-                                    src_axes={'X': 'key%X', 'Y': 'key%Y'})
+
+    field_REGRID = field_CF.regrids(g, dst_cyclic=True, method='nearest_dtos')
 
     return field_REGRID
 
@@ -303,7 +297,7 @@ def reroute_calving_to_ocean(calv_cf, route_file, coupling_period,
                 calv_routed[j, i] = calv[j, i]
             else:
                 calv_routed[ijindex, iiindex] \
-                    = calv_routed[ijindex, iiindex] + calv[j, i]
+                        = calv_routed[ijindex, iiindex] + calv[j, i]
 
     # This is just the regional field - will construct a unified global field
     # elsewhere

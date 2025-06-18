@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 um_reset_icesnowpack_no_icesheet_coupling, based on unicicles_cap_global_to_um
 
