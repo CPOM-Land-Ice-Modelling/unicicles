@@ -1,7 +1,5 @@
 # UNICICLES
 
-# test
-
 ## Build notes
 
 ### Ubuntu 22.04 (serial, debug)
