@@ -6,6 +6,7 @@ Created on Wed Oct 29 09:04:03 2025
 @author: ggslc
 """
 import numpy as np
+import unittest
 import matplotlib.pyplot as plt
 from mean_to_global_mec import mean_to_global_mec
 
@@ -25,12 +26,6 @@ usrf = np.where(xx**2+yy**2 < (m/3)**2, 2000.0*np.abs(usrf), 0)
 ELA = 500
 acab = 0.5 * (usrf - ELA) / 1000
 
-
-# pc = plt.pcolormesh(x,y,acab,vmin=-1,vmax=1,cmap='bwr_r')
-# plt.colorbar(pc)
-
-# test data, made up local -> global grid map
-# M, N = int(m/16)+1 ,int(n/16)+1
 M, N = 32, 32 
 L = np.max(x) - np.min(x)
 W = np.max(y) - np.min(y)
@@ -40,17 +35,29 @@ J = np.int32( N/2 + N/2* (yy-np.min(y)-(xx-np.min(x)))/L )
 # I = np.int32(M * (xx-np.min(x)) / L)
 # J = np.int32(N * (yy-np.min(y)) / W)
 
-# pc = plt.pcolormesh(x,y,J)
-# plt.colorbar(pc)
-
 # test data, elevation classes
 nec = 6
 topo_max_ec = np.linspace(0, 2400, nec+1)
 
 acab_g = mean_to_global_mec(acab, usrf, topo_max_ec, (J, I), (N, M, nec))
-usrf_g = mean_to_global_mec(usrf, usrf, topo_max_ec, (J, I), (N, M, nec))
 
-if True:
+
+class Test_mean_to_global_mec(unittest.TestCase):
+    
+
+    def test_max(self):
+        self.assertAlmostEqual(np.max(acab_g), 0.7321309239418563)
+
+    def test_mim(self):
+        self.assertAlmostEqual(np.min(acab_g), -0.2499999999999878)
+
+    def test_sumsq(self):
+        self.assertAlmostEqual(np.sum(acab_g**2),73.97217312122652)
+        
+unittest.main()
+
+
+if False:
 
     fig, axs = plt.subplots(2, 3, figsize=(12,6))
 
