@@ -62,9 +62,9 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
         surface elevation on the local grid
     topo_max : numpy.ndarray / float 1D array
         elevation class limits
-    local_to_global_map : numpy.ndarray / int 2D array
+    local_to_global_map : tuple of two 2D arrays (I, J)
         global grid indices for each local grid cell
-    global_shape : (int, int)
+    global_shape : (int, int, int)
         shape of the global grid
     lcolfrac : bool, optional
         If true, mean computed over global column, if false mean 
