@@ -47,6 +47,35 @@ def mean_to_global_cell_mec(field, topo, topo_max, local_to_global_map,
 
 def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
                        global_shape, lcolfrac=False):
+    """
+    
+    Compute the means of 2D field on the global 3D grid.
+    Cell values will be non-zero where the 2D surface elevation (topo) 
+    intersects the cell. Cell vertical boundaries are defined
+    by topo_max
+    
+    Parameters
+    ----------
+    field : numpy.ndarray / float 2D array
+        field on the local grid 
+    topo : numpy.ndarray / float 2D array
+        surface elevation on the local grid
+    topo_max : numpy.ndarray / float 1D array
+        elevation class limits
+    local_to_global_map : numpy.ndarray / int 2D array
+        global grid indices for each local grid cell
+    global_shape : (int, int)
+        shape of the global grid
+    lcolfrac : bool, optional
+        If true, mean computed over global column, if false mean 
+        computef over the gobal cell. The default is False.
+
+    Returns
+    -------
+    global_field : numpy.ndarray / float 3D array
+        means of input field for each global cell
+
+    """
 
     nI, nJ, __ = global_shape
     global_field = np.zeros(global_shape)
