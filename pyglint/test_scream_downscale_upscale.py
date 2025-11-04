@@ -8,8 +8,8 @@ Created on Wed Oct 29 09:04:03 2025
 import numpy as np
 import unittest
 import matplotlib.pyplot as plt
-from global_to_local import interp_to_local,interp_to_surface
-from mean_to_global_mec import mean_to_global_mec
+from downscale import interp_to_local,interp_to_surface
+from upscale import mean_to_global_mec
 from test_data import scream_surface_test_data
 
 #generate default 'scream' test data 
