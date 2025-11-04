@@ -19,7 +19,7 @@ X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
   
     
 mask = 0*mask + 1  
-#usrf = 0*usrf + 800 
+usrf = 0*usrf + 800 
   
 #interpolate global fields for each elevation class
 q_sftc_l = interp_to_local(q_sftc_g, xXY, yXY, xx, yy)
