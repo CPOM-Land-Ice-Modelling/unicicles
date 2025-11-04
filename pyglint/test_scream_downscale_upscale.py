@@ -10,7 +10,7 @@ import unittest
 import matplotlib.pyplot as plt
 from downscale import interp_to_local,interp_to_surface
 from upscale import mean_to_global_mec
-from test_data import scream_surface_test_data
+from test_scream_data import scream_surface_test_data
 
 #generate default 'scream' test data 
 X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
