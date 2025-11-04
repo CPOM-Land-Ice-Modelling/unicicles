@@ -10,6 +10,7 @@ import numpy as np
 import unittest
 import matplotlib.pyplot as plt
 from scipy.interpolate import NearestNDInterpolator
+from transformation import cell_id
 
 def scream_surface_test_data(local_grid_shape = (512,512), 
                              global_grid_shape = (32,32),
@@ -35,7 +36,7 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     
     
     #test data / global 2D grid
-    M, N = 32, 32
+    M, N = 32, 28
     DX = m/M
     Y = np.linspace(-DX*M*3/4, DX*M*3/4, M)
     X = np.linspace(-DX*N*3/4, DX*N*3/4, N)
@@ -56,11 +57,12 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     Yxy = -xx * np.sin(alpha) + yy * np.cos(alpha)
     
     DX = 1
-    J = np.linspace(0, M-1 , M)
-    I = np.linspace(0, N-1, N)
+    J = np.arange(0,M)
+    I = np.arange(0,N)
     II, JJ = np.meshgrid(I, J)
-    Ixy = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), II.flat)(xx,yy)
-    Jxy = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), JJ.flat)(xx,yy)
+    CC = cell_id(II, JJ, M, N)
+    local_to_global_map = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), CC.flat)(xx,yy)
+
     
     #test q_sftc_g
     q_sftc_g = np.zeros([M, N, n_elev])
@@ -73,4 +75,4 @@ def scream_surface_test_data(local_grid_shape = (512,512),
         
         
     return  X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
-        Ixy, Jxy, q_sftc_g, q_topo_g, usrf, mask,topo_max_ec 
+        local_to_global_map, q_sftc_g, q_topo_g, usrf, mask,topo_max_ec 

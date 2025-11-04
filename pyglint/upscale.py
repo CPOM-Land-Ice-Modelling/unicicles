@@ -8,41 +8,31 @@ Created on Thu Oct 30 16:13:44 2025
 
 import numpy as np
 from functools import partial
-
-
-def subset_map(local_to_global_map, I, J):
-    I_lg, J_lg = local_to_global_map
-    return (I_lg == I) & (J_lg == J)
+from transformation import cell_id
 
 
 def subset_ec(topo, topo_max, ec):
     return (topo < topo_max[ec+1]) & (topo >= topo_max[ec])
 
 
-def mean_to_global_cell_mec(field, topo, topo_max, local_to_global_map,
-                            lcolfrac, I, J):
+def local_to_global_cell_mec(field, topo, topo_max, local_to_global_map,
+                            lcolfrac, cell_indx):
 
-    indx = subset_map(local_to_global_map, I, J)
+    indx = local_to_global_map == cell_indx
 
     nec = len(topo_max) - 1  # 0,z1,z2,,,,zn
     field_sum = np.zeros(nec)
     field_count = np.zeros(nec)
     ts = topo[indx]
     tf = field[indx]
-    field_count_col = len(tf) + 1.0e-10
+    field_count_col = len(tf) 
     for ec in range(0, nec):
         kndx = subset_ec(ts, topo_max, ec)
         t = tf[kndx]
         field_sum[ec] = np.sum(t)
-        field_count[ec] = len(t) + 1.0e-10
+        field_count[ec] = len(t) 
 
-    field_sum /= (field_count_col if lcolfrac else field_count)
-
-    # conservation check
-    # lsum = np.sum(field[indx])
-    # gsum = np.sum(field_sum * field_count)
-
-    return field_sum
+    return field_sum, field_count, field_count_col
 
 
 def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
@@ -62,8 +52,8 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
         surface elevation on the local grid
     topo_max : numpy.ndarray / float 1D array
         elevation class limits
-    local_to_global_map : tuple of two 2D arrays (I, J)
-        global grid indices for each local grid cell
+    local_to_global_map : 2D array with
+        global grid cell ID for each local grid cell
     global_shape : (int, int, int)
         shape of the global grid
     lcolfrac : bool, optional
@@ -77,13 +67,20 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
 
     """
 
-    nI, nJ, __ = global_shape
+    nJ, nI, __ = global_shape
     global_field = np.zeros(global_shape)
 
-    for I in range(0, nI):
-        f = partial(mean_to_global_cell_mec, field, topo, topo_max,
-                    local_to_global_map, lcolfrac, I)
-        for J in range(0, nJ):
-            global_field[I, J, :] = f(J)
+    div = lambda a,b : a/(b+1.0e-10)
 
+    for I in range(0, nI):
+        for J in range(0, nJ):
+            fsum, count, count_col  = local_to_global_cell_mec( \
+                    field, topo, topo_max, \
+                    local_to_global_map,  \
+                    lcolfrac, cell_id(I,J,nI,nJ))
+    
+            
+            global_field[J, I, :] = div(fsum, \
+                (count_col if lcolfrac else count))
+            
     return global_field

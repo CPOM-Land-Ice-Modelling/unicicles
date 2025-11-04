@@ -14,7 +14,12 @@ from test_scream_data import scream_surface_test_data
 
 #generate default 'scream' test data 
 X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
-        Ixy, Jxy, q_sftc_g, q_topo_g, usrf, mask,topo_max_ec = scream_surface_test_data()
+       local_to_global_map, q_sftc_g, q_topo_g, usrf, \
+           mask,topo_max_ec = scream_surface_test_data(local_grid_shape = (1024,1024))
+  
+    
+mask = 0*mask + 1  
+#usrf = 0*usrf + 800 
   
 #interpolate global fields for each elevation class
 q_sftc_l = interp_to_local(q_sftc_g, xXY, yXY, xx, yy)
@@ -25,19 +30,35 @@ sftc = mask*interp_to_surface(q_sftc_l, q_topo_l, usrf)
        
 #upscale the downscaled temperature  
 p_sftc_g = mean_to_global_mec(sftc, usrf, topo_max_ec, \
-                            (Ixy, Jxy), q_sftc_g.shape)
+                           local_to_global_map, q_sftc_g.shape)
 
     
-class Test_mean_to_global_mec(unittest.TestCase):
+class TestDownscale(unittest.TestCase):    
     
     def test_max(self):
-        self.assertAlmostEqual(np.max(acab_g), 0.7321309239418563)
+        self.assertAlmostEqual(np.max(sftc), 13.44931497764644)
+        
+    def test_min(self):
+        self.assertAlmostEqual(np.min(sftc), -9.47081230980631)
+        
+    def test_sumsq(self):
+        self.assertAlmostEqual(np.sum(sftc**2),2933223.093176326)    
+        
+def test_sumsq(self):
+        self.assertAlmostEqual(np.sum(p_sftc_g**2),10905.463676944699)
+        
+    
+class TestUpscale(unittest.TestCase):
+    
+    def test_max(self):
+        self.assertAlmostEqual(np.max(p_sftc_g), 11.829876400292084)
 
-    def test_mim(self):
-        self.assertAlmostEqual(np.min(acab_g), -0.2499999999999878)
+    def test_min(self):
+        self.assertAlmostEqual(np.min(p_sftc_g), -8.906833236493016)
 
     def test_sumsq(self):
-        self.assertAlmostEqual(np.sum(acab_g**2),73.97217312122652)
+        self.assertAlmostEqual(np.sum(p_sftc_g**2),10905.463676944699)
+        
         
 unittest.main()
 
@@ -93,17 +114,33 @@ if True:
     axs.flat[jndx].legend()
     jndx += 1
  
-    fig, axs = plt.subplots(2, 3, figsize=(12,6))
+    
+# %% Upscaling figure
+    fig, axs = plt.subplots(4, 3, figsize=(8,10))
+    
     nec = p_sftc_g.shape[2]
+    jndx = 0
     for ec in range(0, nec):
-        ax = axs.flat[ec]
-        pc = ax.pcolormesh(p_sftc_g[:, :, ec], vmin=-1, vmax=1, cmap='bwr_r')
-        ax.set_title(f'{topo_max_ec[ec]} < s < {topo_max_ec[ec+1]}')
+        
+        pc = temp_color_map(axs.flat[jndx], X , Y,  p_sftc_g[:, :, ec])
+        axs.flat[jndx].set_title(f'{topo_max_ec[ec]} < s < {topo_max_ec[ec+1]}')
+        axs.flat[jndx].set_xticks([])
+        axs.flat[jndx].set_yticks([])
+        
+        jndx += 1
+        
+        pc = temp_color_map(axs.flat[jndx],X , Y,  q_sftc_g[:, :, ec])
+        axs.flat[jndx].set_title(f'{topo_max_ec[ec]} < s < {topo_max_ec[ec+1]}')
+        axs.flat[jndx].set_xticks([])
+        axs.flat[jndx].set_yticks([])
+       
+        
+        
         #ax.contour(usrf_g[:, :, ec], [topo_max_ec[ec], topo_max_ec[ec+1]])
-        fig.colorbar(pc)
-
-    fig, axs = plt.subplots(1, 1)
-    sftc_vsum = np.sum(p_sftc_g[:, :, :], axis=2)
-    pc = axs.pcolormesh(sftc_vsum, vmin=-1, vmax=1, cmap='bwr_r')
-    fig.colorbar(pc)
+        #fig.colorbar(pc)
+        jndx += 1
+    
+    #sftc_vsum = np.sum(p_sftc_g[:, :, :], axis=2)
+    #pc = axs.flat[jndx].pcolormesh(sftc_vsum, vmin=-1, vmax=1, cmap='bwr_r')
+    #fig.colorbar(pc)
 
