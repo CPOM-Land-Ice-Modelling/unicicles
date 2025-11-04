@@ -60,7 +60,7 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     J = np.arange(0,M)
     I = np.arange(0,N)
     II, JJ = np.meshgrid(I, J)
-    CC = cell_id(II, JJ, M, N)
+    CC = cell_id(II, JJ, N, M)
     local_to_global_map = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), CC.flat)(xx,yy)
 
     
