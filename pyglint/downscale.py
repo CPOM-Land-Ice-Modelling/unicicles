@@ -7,18 +7,25 @@ Created on Mon Nov  3 15:50:48 2025
 """
 
 import numpy as np
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 
-def interp_to_local(q_field_g, xg, yg, xl, yl):
+def interp_to_local(q_field_g, xg, yg, xl, yl, order=1):
 
     nec = q_field_g.shape[2] 
     nyl, nxl = xl.shape 
     if xl.shape != yl.shape:
         raise('xl.shape != yl.shape')
     q_field_l = np.empty((nyl,nxl,nec))
+    
+    if not (order == 1 or order == 0):
+        raise('order != 0 or 1')
+    
+    interpf = LinearNDInterpolator if order == 1 else NearestNDInterpolator
+    
     for ec in range(0, nec):
-        interp = LinearNDInterpolator(np.array([xg.flat, yg.flat]).T, 
-                                      q_field_g[:,:,ec].flat)
+    
+        interp = interpf(np.array([xg.flat, yg.flat]).T, 
+                                      q_field_g[:,:,ec].flat) 
         q_field_l[:,:,ec] = interp(xl,yl)
     return q_field_l
 
@@ -39,7 +46,7 @@ def interp_to_surface(q_field_l, topo_l, topo, lapse=0.0):
                      field )
 
     field = np.where(topo > topo_l[:,:,-1], 
-                     q_field_l[:,:,-1] - lapse*(topo_l[:,:,-1] - topo), 
+                     q_field_l[:,:,-1] + lapse*(topo_l[:,:,-1] - topo), 
                      field )
     
         

@@ -15,28 +15,29 @@ from transformation import cell_id
 def scream_surface_test_data(local_grid_shape = (512,512), 
                              global_grid_shape = (32,32),
                              global_min_elev = 0.0,
+                             global_max_elev = 2400,
                              global_grid_angle = np.pi/6.0,
                              n_elev = 6):
 
     # test data, elevation classes
-    topo_max_ec = np.linspace(0, 2400, n_elev+1)
+    topo_max_ec = np.linspace(global_min_elev, global_max_elev, n_elev+1)
     
     # test data / local grid. centers.
     dx = 1.0
-    m, n = 512, 512
+    m, n = local_grid_shape
     y = np.linspace(-dx*m/2+dx/2, dx*m/2-dx/2, m)
     x = np.linspace(-dx*n/2+dx/2, dx*n/2-dx/2, n)
     xx, yy = np.meshgrid(x, y)
     
     # test surface & mask on local grid
     usrf = 0.7*np.cos(14*xx/m) + 0.3*np.sin(12*yy/n)
-    mask = np.where(xx**2+yy**2 < (m/3)**2,1,0)
+    mask = np.where(xx**2+yy**2 < (.45*min(m,n))**2,1,0)
     usrf = mask * 2000.0 *np.abs(usrf)
     xxx, yyy, zzz = np.meshgrid(x, y, topo_max_ec[:-1])
     
     
     #test data / global 2D grid
-    M, N = 32, 28
+    M, N = global_grid_shape
     DX = m/M
     Y = np.linspace(-DX*M*3/4, DX*M*3/4, M)
     X = np.linspace(-DX*N*3/4, DX*N*3/4, N)
@@ -56,23 +57,27 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     Xxy = xx * np.cos(alpha) + yy * np.sin(alpha)
     Yxy = -xx * np.sin(alpha) + yy * np.cos(alpha)
     
-    DX = 1
+    #DX = 1
     J = np.arange(0,M)
     I = np.arange(0,N)
     II, JJ = np.meshgrid(I, J)
     CC = cell_id(II, JJ, N, M)
     local_to_global_map = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), CC.flat)(xx,yy)
 
+
+    #Jxy = np.int64((Yxy-np.min(Y))/DX)
+    #Ixy = np.int64((Xxy-np.min(X))/DX)
+    #local_to_global_map = cell_id(Ixy, Jxy, N, M)
     
-    #test q_sftc_g
-    q_sftc_g = np.zeros([M, N, n_elev])
-    q_topo_g = np.zeros([M, N, n_elev])
+    #test sftc_g
+    sftc_g = np.zeros([M, N, n_elev])
+    topo_g = np.zeros([M, N, n_elev])
     freeze = 1000.0 + 250.0*Z
     lapse = 9.0e-3
     for ec in range(0, n_elev):
-        q_topo_g[:,:,ec] = (topo_max_ec[ec]) + global_min_elev,
-        q_sftc_g[:,:,ec] = -lapse*( q_topo_g[:,:,ec] - freeze)
+        topo_g[:,:,ec] = 0.5*(topo_max_ec[ec]+topo_max_ec[ec+1])
+        sftc_g[:,:,ec] = -lapse*( topo_g[:,:,ec] - freeze) 
         
         
     return  X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
-        local_to_global_map, q_sftc_g, q_topo_g, usrf, mask,topo_max_ec 
+        local_to_global_map, sftc_g, topo_g, usrf, mask,topo_max_ec 

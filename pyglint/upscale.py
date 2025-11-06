@@ -68,9 +68,9 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
     """
 
     nJ, nI, __ = global_shape
-    global_field = np.zeros(global_shape)
+    global_field = np.empty(global_shape) + np.nan
 
-    div = lambda a,b : a/(b+1.0e-10)
+    div = lambda f,n : np.where(n > 0, f/n, np.nan)
 
     for I in range(0, nI):
         for J in range(0, nJ):
@@ -79,8 +79,7 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
                     local_to_global_map,  \
                     lcolfrac, cell_id(I,J,nI,nJ))
     
-            
-            global_field[J, I, :] = div(fsum, \
-                (count_col if lcolfrac else count))
+            chosen_count = count_col if lcolfrac else count
+            global_field[J, I, :] = np.where(count > 0, fsum/chosen_count, np.nan)
             
     return global_field
