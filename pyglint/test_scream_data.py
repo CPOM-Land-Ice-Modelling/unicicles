@@ -12,12 +12,19 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import NearestNDInterpolator
 from transformation import cell_id
 
-def scream_surface_test_data(local_grid_shape = (512,512), 
-                             global_grid_shape = (32,32),
+LAPSE_RATE = 0.0085
+
+def scream_surface_test_data(*args, local_grid_shape = (511,512), 
+                             global_grid_shape = (32,31),
                              global_min_elev = 0.0,
-                             global_max_elev = 2400,
+                             global_max_elev = 1500,
                              global_grid_angle = np.pi/6.0,
-                             n_elev = 6):
+                             n_elev = 5, 
+                             lapse=LAPSE_RATE, 
+                             z_freeze = 1000.0, 
+                             z_freeze_var = 250.0,
+                             usrf_min = 0.0, usrf_max = 2000.0, 
+                             **kwargs ):
 
     # test data, elevation classes
     topo_max_ec = np.linspace(global_min_elev, global_max_elev, n_elev+1)
@@ -31,8 +38,8 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     
     # test surface & mask on local grid
     usrf = 0.7*np.cos(14*xx/m) + 0.3*np.sin(12*yy/n)
-    mask = np.where(xx**2+yy**2 < (.45*min(m,n))**2,1,0)
-    usrf = mask * 2000.0 *np.abs(usrf)
+    mask = np.where(xx**2+yy**2 < (.45*min(m,n))**2,True,False)
+    usrf = np.where(mask, usrf_min + usrf_max * np.abs(usrf), 0.0)
     xxx, yyy, zzz = np.meshgrid(x, y, topo_max_ec[:-1])
     
     
@@ -42,10 +49,9 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     Y = np.linspace(-DX*M*3/4, DX*M*3/4, M)
     X = np.linspace(-DX*N*3/4, DX*N*3/4, N)
     XX, YY = np.meshgrid(X, Y)
-    L = np.max(X) - np.min(X)
-    Z = np.cos(8*XX/L) + np.sin(9*YY/L)
+   
+   
     
-    #XXX,YYY,ZZZ  = np.meshgrid(X, Y, topo_max_ec[:-1])
     
     #local co-ordinates of global grid points
     alpha = global_grid_angle
@@ -57,27 +63,30 @@ def scream_surface_test_data(local_grid_shape = (512,512),
     Xxy = xx * np.cos(alpha) + yy * np.sin(alpha)
     Yxy = -xx * np.sin(alpha) + yy * np.cos(alpha)
     
-    #DX = 1
+    #local to global index map - a cell id for every local grid cell
     J = np.arange(0,M)
     I = np.arange(0,N)
     II, JJ = np.meshgrid(I, J)
     CC = cell_id(II, JJ, N, M)
     local_to_global_map = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), CC.flat)(xx,yy)
 
-
-    #Jxy = np.int64((Yxy-np.min(Y))/DX)
-    #Ixy = np.int64((Xxy-np.min(X))/DX)
-    #local_to_global_map = cell_id(Ixy, Jxy, N, M)
-    
     #test sftc_g
     sftc_g = np.zeros([M, N, n_elev])
     topo_g = np.zeros([M, N, n_elev])
-    freeze = 1000.0 + 250.0*Z
-    lapse = 9.0e-3
+    
+    L = np.max(x) - np.min(x)
+    #Z = np.cos(8*xXY/L) + np.sin(9*yXY/L)
+    #z = np.cos(8*xx/L) + np.sin(9*yx/L)
+    #s_freeze = 1000.0# + 250.0*Z
+    #lapse = 9.0e-3
+    zfun = lambda x,y :  z_freeze_var*(np.cos(8*x/L) + np.sin(9*y/L))
+    Tfun = lambda s, x, y: -lapse*(s-z_freeze + zfun(x,y)) 
+    
     for ec in range(0, n_elev):
         topo_g[:,:,ec] = 0.5*(topo_max_ec[ec]+topo_max_ec[ec+1])
-        sftc_g[:,:,ec] = -lapse*( topo_g[:,:,ec] - freeze) 
-        
+        sftc_g[:,:,ec] = Tfun(topo_g[:,:,ec],xXY,yXY)
+    sftc_s =  Tfun(usrf,xx,yy) 
         
     return  X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
-        local_to_global_map, sftc_g, topo_g, usrf, mask,topo_max_ec 
+        local_to_global_map, sftc_g, topo_g, usrf, sftc_s, \
+        mask,topo_max_ec 

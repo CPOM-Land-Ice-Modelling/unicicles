@@ -8,17 +8,17 @@ Created on Thu Oct 30 16:13:44 2025
 
 import numpy as np
 from functools import partial
-from transformation import cell_id
+from transformation import cell_id, missing
 
 
 def subset_ec(topo, topo_max, ec):
     return (topo < topo_max[ec+1]) & (topo >= topo_max[ec])
 
 
-def local_to_global_cell_mec(field, topo, topo_max, local_to_global_map,
+def local_to_global_cell_mec(field, topo, mask, topo_max, local_to_global_map,
                             lcolfrac, cell_indx):
 
-    indx = local_to_global_map == cell_indx
+    indx = mask & (local_to_global_map  == cell_indx)
 
     nec = len(topo_max) - 1  # 0,z1,z2,,,,zn
     field_sum = np.zeros(nec)
@@ -35,8 +35,8 @@ def local_to_global_cell_mec(field, topo, topo_max, local_to_global_map,
     return field_sum, field_count, field_count_col
 
 
-def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
-                       global_shape, lcolfrac=False):
+def mean_to_global_mec(field, topo, mask, topo_max, local_to_global_map,
+                       global_shape, lcolfrac=False, missing = missing):
     """
     
     Compute the means of 2D field on the global 3D grid.
@@ -68,18 +68,20 @@ def mean_to_global_mec(field, topo, topo_max, local_to_global_map,
     """
 
     nJ, nI, __ = global_shape
-    global_field = np.empty(global_shape) + np.nan
-
-    div = lambda f,n : np.where(n > 0, f/n, np.nan)
+    global_field = np.full(global_shape, missing) 
 
     for I in range(0, nI):
         for J in range(0, nJ):
             fsum, count, count_col  = local_to_global_cell_mec( \
-                    field, topo, topo_max, \
+                    field, topo, mask, topo_max, \
                     local_to_global_map,  \
                     lcolfrac, cell_id(I,J,nI,nJ))
     
-            chosen_count = count_col if lcolfrac else count
-            global_field[J, I, :] = np.where(count > 0, fsum/chosen_count, np.nan)
+            if lcolfrac:
+                if count_col > 0:
+                    global_field[J, I, :] = fsum/count_col
+            else: 
+                valid = count > 0
+                global_field[J, I, valid] = fsum[valid]/count[valid]
             
     return global_field
