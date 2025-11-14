@@ -67,7 +67,7 @@ def mean_to_global_mec(field, topo, mask, topo_max, local_to_global_map,
 
     """
 
-    nJ, nI, __ = global_shape
+    __, nJ, nI = global_shape
     global_field = np.full(global_shape, missing) 
 
     for I in range(0, nI):
@@ -79,9 +79,9 @@ def mean_to_global_mec(field, topo, mask, topo_max, local_to_global_map,
     
             if lcolfrac:
                 if count_col > 0:
-                    global_field[J, I, :] = fsum/count_col
+                    global_field[:, J, I] = fsum/count_col
             else: 
                 valid = count > 0
-                global_field[J, I, valid] = fsum[valid]/count[valid]
+                global_field[valid, J, I] = fsum[valid]/count[valid]
             
     return global_field

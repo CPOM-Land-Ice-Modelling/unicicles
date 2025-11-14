@@ -32,13 +32,13 @@ def downscale_fig(sftc_g, sftc_l, sftc, error,
     margin = 0.025
     aspect = fig.get_figwidth()/fig.get_figheight()
     step = 2
-    nec = sftc_g.shape[2]
+    nec = sftc_g.shape[0]
     nec_range = range(0, nec, step)
     width = (1.0 - (1+len(nec_range))*margin)/len(nec_range)
     height = width*aspect
     for i,ec in enumerate(range(0, nec, step)):
         ax = fig.add_axes(((1+i)*margin + i*width, 1 - (3*margin+height), width,height))
-        pc = temp_color_map(ax, xXY, yXY, sftc_g[:,:,ec])
+        pc = temp_color_map(ax, xXY, yXY, sftc_g[ec,:,:])
         _ = [ax.axhline(yl,color='k',lw=0.5) for yl in [np.min(y),np.max(y)]]
         _ = [ax.axvline(xl,color='k',lw=0.5) for xl in [np.min(x),np.max(x)]]
         ax.set_title(f'global, {topo_max_ec[ec]} < s < {topo_max_ec[ec+1]}')
@@ -47,7 +47,7 @@ def downscale_fig(sftc_g, sftc_l, sftc, error,
             ax.set_yticks([])
         
         ax = fig.add_axes(((1+i)*margin + i*width, 1 - (5*margin+2*height), width,height))
-        pc = temp_color_map(ax, x, y, sftc_l[:,:,ec])
+        pc = temp_color_map(ax, x, y, sftc_l[ec,:,:])
         ax.set_title(f'local, {topo_max_ec[ec]} < s < {topo_max_ec[ec+1]}')
         if (ec > 0 ):
             ax.set_yticks([])
@@ -78,14 +78,14 @@ def upscale_fig(sftc_g,up_sftc_g,upscale_error,xXY, yXY, x, y):
     fig, axs = plt.subplots(3, 3, figsize=(8,11)) 
     fig.suptitle('Upscaling', fontsize=14)
      
-    nec = sftc_g.shape[2]
+    nec = sftc_g.shape[0]
     step = 2
     for i,ec in enumerate(range(0, nec, step)):
         for j, ffn in  enumerate(zip([sftc_g,up_sftc_g,upscale_error],
                                      ['global','upscaled','error'])):
            ax = axs[j,i]
            f, fn = ffn
-           pc = temp_color_map(ax, xXY, yXY, f[:,:,ec])
+           pc = temp_color_map(ax, xXY, yXY, f[ec,:,:])
            _ = [ax.axhline(yl,color='k',lw=0.5) for yl in [np.min(y),np.max(y)]]
            _ = [ax.axvline(xl,color='k',lw=0.5) for xl in [np.min(x),np.max(x)]]
            ax.set_title(f'{fn}, ec = {ec}')
@@ -107,8 +107,8 @@ def scream_test(*args, **kwargs):
     interp_lapse_rate = kwargs.get("interp_lapse_rate",LAPSE_RATE)
     
     #interpolate global fields for each elevation class
-    sftc_l = interp_to_local(sftc_g, xXY, yXY, xx, yy, order=1)
-    topo_l = interp_to_local(topo_g, xXY, yXY, xx, yy, order=0)
+    sftc_l = interp_to_local(sftc_g, (xXY, yXY), (xx, yy), order=1)
+    topo_l = interp_to_local(topo_g, (xXY, yXY), (xx, yy), order=0)
     
     #project onto surface
     sftc = np.where(mask, interp_to_surface(sftc_l, topo_l, usrf, 
@@ -140,7 +140,7 @@ def scream_test(*args, **kwargs):
 # running the test codes here rather than in TestScream
 # because the profiler works better that way...
 
-plot = False
+plot = True
 
 # case 0 : defaults
 down_err_0, up_err_0 = scream_test() 
@@ -165,7 +165,6 @@ class TestScream(unittest.TestCase):
     def test_up_0_std(self):
         self.assertLess(np.std(down_err_0),0.3)
  
-    
     def test_down_1(self):
         # case 1 downscale should be exact  
         self.assertLess(np.max(np.abs(down_err_1)), 1.0e-10)

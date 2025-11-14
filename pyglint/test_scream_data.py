@@ -71,8 +71,8 @@ def scream_surface_test_data(*args, local_grid_shape = (511,512),
     local_to_global_map = NearestNDInterpolator((np.array([xXY.flat, yXY.flat]).T), CC.flat)(xx,yy)
 
     #test sftc_g
-    sftc_g = np.zeros([M, N, n_elev])
-    topo_g = np.zeros([M, N, n_elev])
+    sftc_g = np.zeros([n_elev, M, N])
+    topo_g = np.zeros([n_elev, M, N])
     
     L = np.max(x) - np.min(x)
     #Z = np.cos(8*xXY/L) + np.sin(9*yXY/L)
@@ -83,8 +83,8 @@ def scream_surface_test_data(*args, local_grid_shape = (511,512),
     Tfun = lambda s, x, y: -lapse*(s-z_freeze + zfun(x,y)) 
     
     for ec in range(0, n_elev):
-        topo_g[:,:,ec] = 0.5*(topo_max_ec[ec]+topo_max_ec[ec+1])
-        sftc_g[:,:,ec] = Tfun(topo_g[:,:,ec],xXY,yXY)
+        topo_g[ec,:,:] = 0.5*(topo_max_ec[ec]+topo_max_ec[ec+1])
+        sftc_g[ec,:,:] = Tfun(topo_g[ec,:,:],xXY,yXY)
     sftc_s =  Tfun(usrf,xx,yy) 
         
     return  X, Y, XX, YY, xXY, yXY, x, y, xx, yy, \
