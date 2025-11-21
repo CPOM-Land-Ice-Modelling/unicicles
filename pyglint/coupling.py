@@ -7,8 +7,9 @@ Created on Fri Nov  7 16:10:16 2025
 """
 import numpy as np
 from downscale import interp_to_local, interp_to_surface
-from transformation import local_to_global_map, cell_id
-
+from upscale import mean_to_global_mec
+from transformation import local_to_global_map, cell_id, fraction_covered
+from transformation import  Uniform2DGrid, Box
 
 def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
                               f3d_atm, area_atm, grid_atm, valid_atm,
@@ -25,14 +26,15 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
 
     ism_to_atm_map = local_to_global_map(down_transform, grid_atm, grid_ism)
 
-    dx = grid_ism.axes[0][1] - grid_ism.axes[0][0]  # \todo - move to Uniform2DGrid
+    dx, dy = grid_ism.spacing # \todo - move to Uniform2DGrid
 
-    smb_adjust = np.zeros(grid_atm.shape)
+    smb_adjust = np.zeros(grid_atm.array_shape)
+    N, M  = grid_atm.array_shape
     for I in grid_atm.axes_index[0]:
         for J in grid_atm.axes_index[1]:
             if np.any(valid_atm[:, J, I]):
 
-                cc = cell_id(I, J, *grid_atm.shape)
+                cc = cell_id(I, J, M, N)
 
                 # vertical sum
                 atm_col_total = np.sum(f3d_atm[:, J, I]*area_atm[:, J, I])
@@ -42,19 +44,48 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
                 ism_area =  dx**2 * np.sum(np.where(ism_to_atm_map == cc, 1.0, 0.0))
 
                 if ism_area > 0:
-                    smb_adjust[I, J] = (atm_col_total - ism_total)/ism_area
+                    smb_adjust[J, I] = (atm_col_total - ism_total)/ism_area
                     f2d_ism = np.where(ism_to_atm_map == cc,
-                                       f2d_ism + smb_adjust[I, J],
+                                       f2d_ism + smb_adjust[J, I],
                                        f2d_ism)
 
-    return f2d_ism * mask_ism
+    return np.ma.masked_array(f2d_ism, ~mask_ism)
+
+
+def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
+
+    # subset
+    lon_ism, lat_ism = up_transform(*grid_ism.coords)
+    dlon, dlat = ( np.max(np.abs(ll[1:] - ll[:-1])) for ll in  grid_atm.axes)
+    bb = Box( [np.min(lon_ism) - dlon, np.min(lat_ism) - dlat],
+             [np.max(lon_ism) + dlon, np.max(lat_ism) + dlat])
+
+
+    ilo = np.argmin( np.abs(grid_atm.axes[1] - bb.lo[1])) - 1
+    ihi = np.argmin( np.abs(grid_atm.axes[1] - bb.hi[1])) + 1
+    grid_atm_sub = Uniform2DGrid( grid_atm.axes[0], grid_atm.axes[1][ilo:ihi])
+
+    arrs = [arr[:,ilo:ihi,:] for arr in arrs_global]
+    arrs.append(grid_atm_sub)
+    arrs.append(ilo)
+    arrs.append(ihi)
+    return arrs
+
+
+
 
 
 def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
-               topo_ism, frac_ism,  grid_ism,
+               topo_ism, frac_ism, mask_ism, grid_ism,
                up_transform,  down_transform):
 
-    atm_coords = down_transform.local_xy((grid_atm.coords))
+
+    smb_atm, sfct_atm, topo_atm, area_atm, grid_atm, ilo, ihi = \
+        crop_global((smb_atm, sfct_atm, topo_atm, area_atm),
+                    grid_atm, grid_ism, up_transform)
+
+    atm_coords = down_transform(*grid_atm.coords)
+
 
     valid_atm = area_atm.data > 0.0
     smb_xyz = interp_to_local(smb_atm.data, atm_coords, grid_ism.coords,
@@ -66,10 +97,9 @@ def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
     # this is probably uniform in x,y , but ...
     topo_xyz = interp_to_local(topo_atm, atm_coords, grid_ism.coords, order=1)
 
-    mask_ism = np.where(frac_ism > 0.01, 1, 0)
 
     sfct_ism, smb_ism = \
-        (mask_ism*interp_to_surface(f_xyz, topo_xyz, topo_ism)
+        (np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
          for f_xyz in (sfct_xyz, smb_xyz))
 
     if not isinstance(area_atm, type(None)):
@@ -81,102 +111,53 @@ def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
     return smb_ism, sfct_ism
 
 
-def ism_to_atm():
+def splice_global(global_arr, region_arr, frac_cover,  ilo, ihi):
 
-    icefrac_atm = None
+    global_arr[:,ilo:ihi,:] = region_arr*frac_cover + (1.0-frac_cover)*global_arr[:,ilo:ihi,:]
 
-    return icefrac_atm
+    return global_arr
 
+def ism_to_atm(topo_max_atm, area_atm, grid_atm,
+               ice_frac_atm, topo_atm,
+               topo_ism, frac_ism, mask_ism, grid_ism,
+               up_transform, down_transform):
 
-if __name__ == "__main__":
+    # GLINT 3D ouputs : gtopo - ice sheet surface,
+    #                   gfrac - ice covered fraction
+    #                   grofi - ice run off (calving?)
+    #                   grofl - liquid run off
+    #                   ghflx - heat flux
+    #                   gsdep - snow depth (in total / out anomaly)
+    #                   gcalv = calving flux
+    # GLINT 0D outputs : ice volume
 
-    #test program - move to test_coupling.py
-    from netCDF4 import Dataset
-    from transformation import up_down_pair, Uniform2DGrid, Box, PROJ_ARCTIC_4326
-    import matplotlib.pyplot as plt
+    # wrappers/ukesm-ice_NETCDF/gl_mod.f90 calls glint to obtain
+    # gsdep (in also), gfrac, ghflx, gcalv, glfrac, ice_volume
+    # i.e ignore grofi , grofl
 
-    #transformation pair
-    up_tr, down_tr = up_down_pair(PROJ_ARCTIC_4326)
+    # \todo check splice_fields_gcm
 
-    #example ice sheet model output (input to the coupler). bisicles CF
-    nc_bike_in = Dataset('bike_cf_gris4326.nc','r')
-    topo_bike = nc_bike_in['orog'][:,:]
-    frac_bike = nc_bike_in['sftgif'][:,:]
-    grid_bike = Uniform2DGrid(nc_bike_in['x'][:].data, nc_bike_in['y'][:].data)
+    dbg = 0
 
+    area_atm_sub, grid_atm_sub, ilo, ihi = \
+        crop_global([area_atm], grid_atm, grid_ism, up_transform)
 
-    #example atmosphere model output (input to the coupler).
-    nc_um_in = Dataset('atmos_cx209c_P1Y_20000101-20010101_icecouple.nc','r')
-    lon_bike, lat_bike = up_tr.global_XY(grid_bike.coords)
-    #plt.pcolormesh(lon_bike, lat_bike,topo_bike,vmin=0,vmax=2000, cmap='jet')
+    ism_to_atm_map = local_to_global_map(down_transform, grid_atm_sub, grid_ism)
 
+    region_data = mean_to_global_mec([frac_ism.data, topo_ism.data],
+                                                [True, False],
+                                                topo_ism.data, mask_ism,
+                                                topo_max_atm, ism_to_atm_map,
+                                                area_atm_sub.shape)
 
-    ilo, ihi = 148, 188
-    #ilo, ihi = 0, -1
-    jlo, jhi = 116, 140
+    frac_cover = fraction_covered(down_transform, grid_atm_sub, grid_ism)
+    global_data = [ice_frac_atm, topo_atm]
+    global_data = [splice_global(g, r , frac_cover, ilo, ihi)
+                   for g,r in zip(global_data, region_data)]
 
-    #ilo, ihi = 0, 192
-    #jlo, jhi = 0, 144
-    grid_um = Uniform2DGrid(nc_um_in['longitude'][ilo:ihi].data,
-                                    nc_um_in['latitude'][jlo:jhi].data)
-
-    def prep_um(arr):
-        return arr[:,jlo:jhi,ilo:ihi]
-
-    area_um = prep_um(nc_um_in['tile_surface_area'])
-    smb_um = prep_um(nc_um_in['ice_smb']) * 910 * 12 # values suggest kg/month
-    sfct_um = prep_um(nc_um_in['ice_stemp'])
-    z_id = nc_um_in['tile_id']
-
-    lon, lat = grid_um.coords
-    nlat, nlon = lat.shape
-    nec = z_id.shape[0]
-    topo_um = np.zeros(smb_um.shape)
-    #making this up too
-    topo_mid = np.array([31.86, 297.01, 551.87, 846.16, 1151.70,
-                1457.07, 1808.83, 2257.02,  2737.89, 3099.39])
-    for ec in range(0,nec):
-        topo_um[ec,:,:] = topo_mid[ec]
-
-
-    plt.pcolormesh(*grid_um.axes, np.mean(sfct_um, axis=0),vmin=-50, cmap='bwr_r')
-    plt.colorbar()
-    plt.show()
-
-    #raise
+    return global_data
 
 
 
-#%% downscaling & upscaling
-    smb_bike, sfct_bike = atm_to_ism(smb_um, sfct_um, topo_um, area_um,
-                                   grid_um, topo_bike, frac_bike,
-                                   grid_bike, up_tr, down_tr)
-# %% plot
-    plot = True
-    if plot:
 
-        def cf(ax, z, zl, label=True):
-            cs = ax.contour(*km(*grid_bike.axes), z, zl, colors=['k'] ,linewidths=0.5, linestyles='-')
-            if label:
-                ax.clabel(cs, cs.levels, fontsize=8)
-
-        def km(x,y):
-            return (x*1.0e-3,y*1e-3)
-
-        fig, axs = plt.subplots(1,2)
-        __ = [ax.set_aspect('equal') for ax in axs.flat]
-        #a = 0.1
-        ax = axs.flat[0]
-        pc = ax.pcolormesh(*km(*grid_bike.axes),smb_bike,cmap='bwr_r',vmin=-1,vmax=1)
-        fig.colorbar(pc,ax=ax,shrink=0.5)
-        cf(ax, lon_bike, 360+np.arange(-60,-15,5))
-        cf(ax, lat_bike, np.arange(60,90,5))
-        cf(ax, frac_bike, [0.05], label=False)
-
-        ax = axs.flat[1]
-        pc = ax.pcolormesh(*km(*grid_bike.axes),sfct_bike,cmap='plasma',vmin=-50,vmax=0)
-        fig.colorbar(pc,ax=ax,shrink=0.5)
-        cf(ax, lon_bike, 360+np.arange(-60,-15,5))
-        cf(ax, lat_bike, np.arange(60,90,5))
-        cf(ax, frac_bike, [0.05], label=False)
 

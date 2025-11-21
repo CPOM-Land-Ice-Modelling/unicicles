@@ -22,6 +22,8 @@ def interp_to_local(zg, global_coords, local_coords, order=1, valid=None):
 
     if order not in (0,1):
         raise ValueError('order not in (0,1)')
+        
+
 
     interpf = LinearNDInterpolator if order == 1 else NearestNDInterpolator
 

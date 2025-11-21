@@ -118,7 +118,7 @@ def scream_test(*args, **kwargs):
     downscale_error =  np.where(mask, (sftc - sftc_known), 0.0)  
     
     #upscale the downscaled temperature  
-    up_sftc_g = mean_to_global_mec(sftc, usrf, mask, topo_max_ec, \
+    up_sftc_g,  = mean_to_global_mec([sftc],[False], usrf, mask, topo_max_ec, \
                                local_to_global_map, sftc_g.shape)
     
         

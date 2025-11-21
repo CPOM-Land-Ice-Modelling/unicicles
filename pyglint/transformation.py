@@ -16,9 +16,12 @@ PROJ_ANTARCTIC_3031 = '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +x_0=0 +y_0=0
 PROJ_ARCTIC_4326 = '+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
 
 def cell_id(i, j, ni, nj):
-    return j + nj * i
+    return i + ni * j
 
 class Box:
+    """
+    Box defined by lower and upper corner vectors lo, hi
+    """
 
     def __init__(self, lo, hi):
         self._lo = lo
@@ -26,26 +29,51 @@ class Box:
 
     @property
     def lo(self):
+        """
+        lower corner vector
+        """
         return self._lo
 
     @property
     def hi(self):
+        """
+        upper corner vector
+        """
         return self._hi
 
 
 class Uniform2DGrid:
-
+    """
+    2D grid with uniform spacing
+    """
 
     def __init__(self, x, y):
 
+        #check x, y ascending
+        for xi in (x, y):
+            if np.any(xi[:-1] >= xi[1:]):
+                raise ValueError('x, y must be strictly ascending')
+
+            dxi = xi[1] - xi[0]
+            eps = 1.0e-10
+            if np.any(xi[1:] > xi[:-1] + dxi + eps):
+                raise ValueError('x, y must be uniformly spaced')
+
+
+        #true for any grid defined by np.meshgrid(x, y)
         self._axes = (x, y)
-        self._shape = tuple(len(xi) for xi in self._axes)
-        self._axes_index = tuple(np.arange(0,N) for N in self._shape)
+        self._shape = (x.shape[0], y.shape[0])
+        self._axes_index = tuple(np.arange(0,n) for n in self._shape)
         self._coords = np.meshgrid(x, y)
+        self._array_shape = self._coords[0].shape
+
+        # only for a uniform grid
+        self._spacing = tuple(xi[1]-xi[0] for xi in self._axes)
+
 
     @property
-    def shape(self):
-        return self._shape
+    def array_shape(self):
+        return self._array_shape
 
     @property
     def axes(self):
@@ -54,6 +82,10 @@ class Uniform2DGrid:
     @property
     def axes_index(self):
         return self._axes_index
+
+    @property
+    def spacing(self):
+        return self._spacing
 
 
     @property
@@ -68,40 +100,22 @@ class Uniform2DGrid:
         for i, x in enumerate(self._axes):
             t = x[np.where((x >= crop_box.lo[i]) & (x <= crop_box.hi[i]))]
             axes.append(t)
+        x, y = axes[0], axes[1]
+        return Uniform2DGrid(x, y)
 
-        return Uniform2DGrid(*axes)
-
-
-class Downscale:
-
-    def __init__(self, transform):
-        self._transform = transform
-
-    def local_xy(self, global_XY):
-        return self._transform(*global_XY)
-
-class Upscale:
-
-    def __init__(self, transform):
-        self._transform = transform
-
-    def global_XY(self, local_xy):
-        return self._transform(*local_xy)
 
 
 def local_to_global_map(downscale_transform, global_grid, local_grid):
 
-    I, J = global_grid.axes_index
-    N, M = global_grid.shape
-    II, JJ = np.meshgrid(I, J)
-    CC = cell_id(II, JJ, N, M)
-    XY = downscale_transform.local_xy(global_grid.coords)
-    xy = local_grid.coords
+    ig, jg = global_grid.axes_index
+    ng, mg = global_grid.array_shape
+    ii, jj = np.meshgrid(ig, jg)
+    ij = cell_id(ii, jj, mg, ng)
+    xyg = downscale_transform(*global_grid.coords)
+    xyl = local_grid.coords
     return NearestNDInterpolator(
-        (np.array([XY[0].flat, XY[1].flat]).T), CC.flat)(*xy)
+        (np.array([xyg[0].flat, xyg[1].flat]).T), ij.flat)(*xyl)
 
-def lon_fiddle(lonlat):
-    return lonlat[0]%360,lonlat[1]
 
 def up_down_pair(proj):
 
@@ -113,32 +127,110 @@ def up_down_pair(proj):
             raise ValueError(f'unrecognised proj string {proj}')
 
     if isinstance(proj, Proj):
-        post_proj = lambda X,Y : (X%360, Y)
-        up = Upscale(lambda x,y : post_proj(*proj(x,y,inverse=True)))
-        down = Downscale(lambda x,y : proj(x,y,inverse=False))
+
+        def lon360(lon, lat):
+            return lon%360, lat
+
+        def up(x, y):
+            return  lon360(*proj(x, y, inverse=True))
+
+        def down(lon, lat):
+            return proj(lon, lat, inverse=False)
     else:
         raise TypeError(f'unrecogised projection type {type(proj)}')
 
     return up, down
 
 
-if __name__ == "__main__":
+def grown_grid(downscale_transform, global_grid, local_grid):
+    """
+    Define a local (x,y) grid which covers at least the 
+    local regions covered the supplied transformed global grid,
+    and has cell centers and spacing in common with
+    the supplied local (x,y) grid
 
-    import matplotlib.pyplot as plt
-    up, down = up_down_pair(PROJ_ANTARCTIC_3031)
+    Parameters
+    ----------
+    downscale_transform : function(lon, lat) -> (x, y)
+       tranformation mapping global (lon, lat) to local (x,y) co-ordinates
+    global_grid : Uniform2DGrid
+        global (lon, lat) grid spec - need not cover the globe 
+    local_grid : TYPE
+       local (x, y) grid spec
 
-    km = 1.0e3
-    x = np.linspace(-3000*km, 3000*km, 81)
-    y = np.linspace(-3000*km, 3000*km, 81)
+    Returns
+    -------
+    UniformGrid2D
+        
+    """
 
-    xx, yy =  np.meshgrid(x, y)
-    llon,llat = up.global_XY((xx, yy))
+    xyg = downscale_transform(*global_grid.coords)
+    xyl = local_grid.axes
+    dxy = local_grid.spacing
 
-    xxx, yyy = down.local_xy((llon, llat))
+    m = [max(0, int((- np.min(xg) + np.min(xl))/dxl) + 1)
+         for xg, xl, dxl in zip(xyg, xyl, dxy)]
 
-    z = xx**2 + yy**2
+    n = [max(0, int((np.max(xg) - np.max(xl))/dxl) + 1)
+         for xg, xl, dxl in zip(xyg, xyl, dxy)]
 
-    plt.pcolormesh(x,y,z)
-    plt.contour(x,y,xxx)
-    plt.contour(x,y,yyy)
+    p, q = [np.arange(x[0] - mx*dx, x[-1] + nx*dx, step=dx)
+            for x, mx, nx, dx in zip(xyl, m, n, dxy)]
+
+    return Uniform2DGrid(p, q)
+
+
+def fraction_covered(downscale_transform, global_grid, local_grid):
+    """
     
+    Compute fraction of each global grid cell covered by local grid cells
+
+    Parameters
+    ----------
+    downscale_transform : function(lon, lat) -> (x, y)
+        tranformation mapping global (lon, lat) to local (x,y) co-ordinates
+    global_grid : Uniform2DGrid
+        global (lon, lat) grid spec - need not cover the globe 
+    local_grid : Uniform2DGrid
+        local (x, y) grid spec
+
+    Raises
+    ------
+    TypeError
+        if  global_grid, local_grid are not Uniform2DGrid
+
+    Returns
+    -------
+    numpy.ndarray(dtype = numpy.float64)
+        fractional coverage
+
+    """
+
+    if not isinstance(global_grid, Uniform2DGrid):
+        raise TypeError('global_grid not a Uniform2DGrid')
+
+    if not isinstance(local_grid, Uniform2DGrid):
+        raise TypeError('local_grid not a Uniform2DGrid')
+
+    map_a = local_to_global_map(downscale_transform, global_grid, local_grid)
+
+    map_b = local_to_global_map(downscale_transform, global_grid,
+                                grown_grid(downscale_transform,
+                                           global_grid, local_grid))
+
+    ng, mg = global_grid.array_shape
+
+    def cellid(i,j):
+        return cell_id(i,j,mg,ng)
+
+    #frac_coverage = np.zeros(global_grid.array_shape)
+    ig, jg = global_grid.axes_index
+    indx = cellid(*np.meshgrid(ig, jg)).flat[:]
+    a = np.bincount(map_a.flat, minlength=1 + np.max(indx))
+    b = np.bincount(map_b.flat, minlength=1 + np.max(indx))
+
+    frac_coverage = np.where(b[indx] > 0,
+                             a[indx]/np.float64(b[indx]),
+                             0.0).reshape(global_grid.array_shape)
+
+    return frac_coverage
