@@ -7,13 +7,12 @@ Created on Fri Nov 21 13:05:34 2025
 """
 
 from transformation import *
+import matplotlib.pyplot as plt
+import unittest
 
-if __name__ == "__main__":
-
-    import matplotlib.pyplot as plt
-
-
-
+def map_and_fractions():
+    
+   
     up, down = up_down_pair(PROJ_ANTARCTIC_3031)
 
     km = 1.0e3
@@ -60,3 +59,23 @@ if __name__ == "__main__":
     ax.set_yticks(lat + dlat/2)
     ax.set_xticks(lon + dlon/2)
     ax.grid(color='k',lw=0.5)
+    
+    return lgm, fr
+
+class TestTranformation(unittest.TestCase):    
+
+    def test_fractions(self):
+         self.assertAlmostEqual(np.max(arr_frac),1.0)
+         self.assertAlmostEqual(np.min(arr_frac),0.0)
+         self.assertAlmostEqual(np.mean(arr_frac), 0.6783907677463454)
+         
+    def test_map(self):
+         self.assertEqual(np.min(arr_map), 0)
+         self.assertEqual(np.max(arr_map), 463)
+         self.assertEqual(np.unique(arr_map).shape, (396,))
+         
+if __name__ == "__main__":
+
+   arr_map, arr_frac =  map_and_fractions()
+   unittest.main()
+    
