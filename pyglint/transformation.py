@@ -9,7 +9,7 @@ Created on Tue Nov  4 10:14:16 2025
 import numpy as np
 from pyproj import Proj
 from scipy.interpolate import NearestNDInterpolator
-
+from dataclass import dataclass
 missing = np.nan
 #widely used projections
 PROJ_ANTARCTIC_3031 = '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
@@ -103,18 +103,50 @@ class Uniform2DGrid:
         x, y = axes[0], axes[1]
         return Uniform2DGrid(x, y)
 
+def local_to_global_map_up(up_transform, global_grid, local_grid):
 
+    xylg = up_transform(*local_grid.coords)
+    ilg, jlg = [ np.intp((xlg-xg[0]) / dxg - 0.5) 
+                for xlg, xg, dxg in zip(xylg, global_grid.axes, global_grid.spacing)]
+    ng, mg = global_grid.array_shape
+    return cell_id(ilg, jlg, mg, ng)
 
-def local_to_global_map(downscale_transform, global_grid, local_grid):
+def local_to_global_map_down(down_transform, global_grid, local_grid):
 
     ig, jg = global_grid.axes_index
     ng, mg = global_grid.array_shape
     ii, jj = np.meshgrid(ig, jg)
     ij = cell_id(ii, jj, mg, ng)
-    xyg = downscale_transform(*global_grid.coords)
+    xyg = down_transform(*global_grid.coords)
     xyl = local_grid.coords
-    return NearestNDInterpolator(
-        (np.array([xyg[0].flat, xyg[1].flat]).T), ij.flat)(*xyl)
+    return np.intp(NearestNDInterpolator(
+        (np.array([xyg[0].flat, xyg[1].flat]).T), ij.flat)(*xyl))
+
+def local_to_global_map(up_transform, down_transform, 
+                        global_grid, local_grid, method="down"):
+    
+    if method == "down":
+        return local_to_global_map_down(down_transform, 
+                                        global_grid, local_grid)
+    elif  method == "up":
+        return local_to_global_map_up(up_transform, 
+                                       global_grid, local_grid)
+    else:
+        raise ValueError(f'unknown local_to_global_map method {method}')
+
+    return None
+
+
+class GlobalLocal:
+    
+    def __init__(self, global_grid, local_grid, up_transform, down_transform):
+        self._global_grid = global_grid
+        self._local_grid = local_grid
+        self._up_transform = up_transform
+        self._down_transform = down_transform
+        self._local_to_global_map = local_to_global_map(up_transform, down_transform, 
+                        global_grid, local_grid)
+
 
 
 def up_down_pair(proj):
@@ -180,14 +212,16 @@ def grown_grid(downscale_transform, global_grid, local_grid):
     return Uniform2DGrid(p, q)
 
 
-def fraction_covered(downscale_transform, global_grid, local_grid):
+def fraction_covered(up_transform, down_transform, global_grid, local_grid):
     """
     
     Compute fraction of each global grid cell covered by local grid cells
 
     Parameters
     ----------
-    downscale_transform : function(lon, lat) -> (x, y)
+    up_transform : function(x, y) -> (lon, lat)
+        tranformation mapping local (x,y) to global (lon, lat) co-ordinates
+    down_transform : function(lon, lat) -> (x, y)
         tranformation mapping global (lon, lat) to local (x,y) co-ordinates
     global_grid : Uniform2DGrid
         global (lon, lat) grid spec - need not cover the globe 
@@ -212,10 +246,10 @@ def fraction_covered(downscale_transform, global_grid, local_grid):
     if not isinstance(local_grid, Uniform2DGrid):
         raise TypeError('local_grid not a Uniform2DGrid')
 
-    map_a = local_to_global_map(downscale_transform, global_grid, local_grid)
+    map_a = local_to_global_map(up_transform, down_transform, global_grid, local_grid)
 
-    map_b = local_to_global_map(downscale_transform, global_grid,
-                                grown_grid(downscale_transform,
+    map_b = local_to_global_map(up_transform, down_transform, global_grid,
+                                grown_grid(down_transform,
                                            global_grid, local_grid))
 
     ng, mg = global_grid.array_shape

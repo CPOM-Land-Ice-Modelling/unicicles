@@ -13,7 +13,7 @@ from transformation import  Uniform2DGrid, Box
 
 def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
                               f3d_atm, area_atm, grid_atm, valid_atm,
-                              down_transform):
+                              up_transform, down_transform):
 
 
 
@@ -24,7 +24,7 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
     # there is a NASTY! comment in the glint code
     f2d_ism = np.zeros(f2d_ism_nc.shape) + f2d_ism_nc
 
-    ism_to_atm_map = local_to_global_map(down_transform, grid_atm, grid_ism)
+    ism_to_atm_map = local_to_global_map(up_transform, down_transform, grid_atm, grid_ism)
 
     dx, dy = grid_ism.spacing # \todo - move to Uniform2DGrid
 
@@ -106,7 +106,7 @@ def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
         smb_ism = glint_conservation_adjust(
             smb_ism, mask_ism, grid_ism,
             smb_atm, area_atm, grid_atm, valid_atm,
-            down_transform)
+            up_transform, down_transform)
 
     return smb_ism, sfct_ism
 
@@ -142,7 +142,7 @@ def ism_to_atm(topo_max_atm, area_atm, grid_atm,
     area_atm_sub, grid_atm_sub, ilo, ihi = \
         crop_global([area_atm], grid_atm, grid_ism, up_transform)
 
-    ism_to_atm_map = local_to_global_map(down_transform, grid_atm_sub, grid_ism)
+    ism_to_atm_map = local_to_global_map(up_transform, down_transform, grid_atm_sub, grid_ism)
 
     region_data = mean_to_global_mec([frac_ism.data, topo_ism.data],
                                                 [True, False],
@@ -150,7 +150,7 @@ def ism_to_atm(topo_max_atm, area_atm, grid_atm,
                                                 topo_max_atm, ism_to_atm_map,
                                                 area_atm_sub.shape)
 
-    frac_cover = fraction_covered(down_transform, grid_atm_sub, grid_ism)
+    frac_cover = fraction_covered(up_transform, down_transform, grid_atm_sub, grid_ism)
     global_data = [ice_frac_atm, topo_atm]
     global_data = [splice_global(g, r , frac_cover, ilo, ihi)
                    for g,r in zip(global_data, region_data)]

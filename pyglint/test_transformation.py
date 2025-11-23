@@ -10,6 +10,27 @@ from transformation import *
 import matplotlib.pyplot as plt
 import unittest
 
+def map_only():
+    
+    up, down = up_down_pair(PROJ_ANTARCTIC_3031)
+
+    km = 1.0e3
+    nx = 256
+    dx = 4000*km/nx
+    x = np.linspace(-2000*km + dx/2, 2000*km - dx/2, nx)
+    y = np.linspace(-2000*km + dx/2, 2000*km - 3*dx/2, nx-1)
+    local_grid = Uniform2DGrid(x, y)
+     
+     
+    nlon, nlat = 36, 15
+    dlon, dlat = 360.0/nlon, 30/nlat
+    lon = np.linspace(dlon/2.0, 360.0-dlon/2.0, nlon)
+    lat = np.linspace(-90+dlat/2, -60-dlat/2, nlat)
+    global_grid = Uniform2DGrid(lon, lat)
+
+    lgmd =  local_to_global_map(up, down, global_grid, local_grid, method="down")
+    lgmu =  local_to_global_map(up, down, global_grid, local_grid, method="up")
+
 def map_and_fractions():
     
    
@@ -28,10 +49,8 @@ def map_and_fractions():
     lon = np.linspace(dlon/2.0, 360.0-dlon/2.0, nlon)
     lat = np.linspace(-90+dlat/2, -60-dlat/2, nlat)
     global_grid = Uniform2DGrid(lon, lat)
-
-    lgm =  local_to_global_map(down, global_grid, local_grid)
-
-    fr = fraction_covered(down, global_grid, local_grid)
+    lgm =  local_to_global_map(up, down, global_grid, local_grid)
+    fr = fraction_covered(up, down, global_grid, local_grid)
 
 
     fig, axs = plt.subplots(1, 2, figsize=(8,4))
@@ -76,6 +95,7 @@ class TestTranformation(unittest.TestCase):
          
 if __name__ == "__main__":
 
+  
    arr_map, arr_frac =  map_and_fractions()
    unittest.main()
-    
+  # map_only()
