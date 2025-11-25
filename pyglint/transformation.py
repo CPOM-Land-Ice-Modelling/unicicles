@@ -9,7 +9,7 @@ Created on Tue Nov  4 10:14:16 2025
 import numpy as np
 from pyproj import Proj
 from scipy.interpolate import NearestNDInterpolator
-from dataclass import dataclass
+
 missing = np.nan
 #widely used projections
 PROJ_ANTARCTIC_3031 = '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
@@ -137,7 +137,7 @@ def local_to_global_map(up_transform, down_transform,
     return None
 
 
-class GlobalLocal:
+class GlobalLocalGridPair:
     
     def __init__(self, global_grid, local_grid, up_transform, down_transform):
         self._global_grid = global_grid
@@ -146,6 +146,28 @@ class GlobalLocal:
         self._down_transform = down_transform
         self._local_to_global_map = local_to_global_map(up_transform, down_transform, 
                         global_grid, local_grid)
+        
+        
+    @property
+    def global_grid(self):
+        return self._global_grid
+    
+    @property
+    def local_grid(self):
+        return self._local_grid
+    
+    @property
+    def local_to_global_map(self):
+       return self._local_to_global_map
+
+    @property 
+    def down_transform(self):
+        return self._down_transform
+    
+    @property 
+    def up_transform(self):
+      return self._up_transform
+  
 
 
 
@@ -212,26 +234,19 @@ def grown_grid(downscale_transform, global_grid, local_grid):
     return Uniform2DGrid(p, q)
 
 
-def fraction_covered(up_transform, down_transform, global_grid, local_grid):
+def fraction_covered(grid_pair):
     """
     
     Compute fraction of each global grid cell covered by local grid cells
 
     Parameters
     ----------
-    up_transform : function(x, y) -> (lon, lat)
-        tranformation mapping local (x,y) to global (lon, lat) co-ordinates
-    down_transform : function(lon, lat) -> (x, y)
-        tranformation mapping global (lon, lat) to local (x,y) co-ordinates
-    global_grid : Uniform2DGrid
-        global (lon, lat) grid spec - need not cover the globe 
-    local_grid : Uniform2DGrid
-        local (x, y) grid spec
+    grid_pair : local and global grids, etc
 
     Raises
     ------
     TypeError
-        if  global_grid, local_grid are not Uniform2DGrid
+        if  grid_pair is not a GlobalLocalGridPair
 
     Returns
     -------
@@ -240,31 +255,33 @@ def fraction_covered(up_transform, down_transform, global_grid, local_grid):
 
     """
 
-    if not isinstance(global_grid, Uniform2DGrid):
-        raise TypeError('global_grid not a Uniform2DGrid')
+    if not isinstance(grid_pair, GlobalLocalGridPair):
+        raise TypeError('grid_pair is not a GlobalLocalGridPair')
 
-    if not isinstance(local_grid, Uniform2DGrid):
-        raise TypeError('local_grid not a Uniform2DGrid')
 
-    map_a = local_to_global_map(up_transform, down_transform, global_grid, local_grid)
 
-    map_b = local_to_global_map(up_transform, down_transform, global_grid,
-                                grown_grid(down_transform,
-                                           global_grid, local_grid))
+    map_a = grid_pair.local_to_global_map
 
-    ng, mg = global_grid.array_shape
+    map_b = local_to_global_map(grid_pair.up_transform, 
+                                grid_pair.down_transform, 
+                                grid_pair.global_grid,
+                                grown_grid(grid_pair.down_transform,
+                                           grid_pair.global_grid, 
+                                           grid_pair.local_grid))
+
+    ng, mg = grid_pair.global_grid.array_shape
 
     def cellid(i,j):
         return cell_id(i,j,mg,ng)
 
     #frac_coverage = np.zeros(global_grid.array_shape)
-    ig, jg = global_grid.axes_index
+    ig, jg = grid_pair.global_grid.axes_index
     indx = cellid(*np.meshgrid(ig, jg)).flat[:]
     a = np.bincount(map_a.flat, minlength=1 + np.max(indx))
     b = np.bincount(map_b.flat, minlength=1 + np.max(indx))
 
     frac_coverage = np.where(b[indx] > 0,
                              a[indx]/np.float64(b[indx]),
-                             0.0).reshape(global_grid.array_shape)
+                             0.0).reshape(grid_pair.global_grid.array_shape)
 
     return frac_coverage

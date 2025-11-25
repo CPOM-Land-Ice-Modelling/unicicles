@@ -9,11 +9,11 @@ import numpy as np
 from downscale import interp_to_local, interp_to_surface
 from upscale import mean_to_global_mec
 from transformation import local_to_global_map, cell_id, fraction_covered
-from transformation import  Uniform2DGrid, Box
+from transformation import  Uniform2DGrid, Box, GlobalLocalGridPair
 
-def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
-                              f3d_atm, area_atm, grid_atm, valid_atm,
-                              up_transform, down_transform):
+def glint_conservation_adjust(f2d_ism_nc, mask_ism,  
+                              f3d_atm, area_atm,  valid_atm,
+                              grid_pair):
 
 
 
@@ -24,7 +24,10 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism, grid_ism,
     # there is a NASTY! comment in the glint code
     f2d_ism = np.zeros(f2d_ism_nc.shape) + f2d_ism_nc
 
-    ism_to_atm_map = local_to_global_map(up_transform, down_transform, grid_atm, grid_ism)
+    ism_to_atm_map = grid_pair.local_to_global_map
+    grid_ism = grid_pair.local_grid
+    grid_atm = grid_pair.global_grid
+
 
     dx, dy = grid_ism.spacing # \todo - move to Uniform2DGrid
 
@@ -84,8 +87,9 @@ def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
         crop_global((smb_atm, sfct_atm, topo_atm, area_atm),
                     grid_atm, grid_ism, up_transform)
 
-    atm_coords = down_transform(*grid_atm.coords)
+    grid_pair = GlobalLocalGridPair(grid_atm, grid_ism, up_transform, down_transform)  
 
+    atm_coords = down_transform(*grid_atm.coords)
 
     valid_atm = area_atm.data > 0.0
     smb_xyz = interp_to_local(smb_atm.data, atm_coords, grid_ism.coords,
@@ -104,9 +108,9 @@ def atm_to_ism(smb_atm, sfct_atm, topo_atm, area_atm,  grid_atm,
 
     if not isinstance(area_atm, type(None)):
         smb_ism = glint_conservation_adjust(
-            smb_ism, mask_ism, grid_ism,
-            smb_atm, area_atm, grid_atm, valid_atm,
-            up_transform, down_transform)
+            smb_ism, mask_ism, 
+            smb_atm, area_atm, valid_atm,
+            grid_pair)
 
     return smb_ism, sfct_ism
 
@@ -141,16 +145,17 @@ def ism_to_atm(topo_max_atm, area_atm, grid_atm,
 
     area_atm_sub, grid_atm_sub, ilo, ihi = \
         crop_global([area_atm], grid_atm, grid_ism, up_transform)
-
-    ism_to_atm_map = local_to_global_map(up_transform, down_transform, grid_atm_sub, grid_ism)
-
+        
+    grid_pair = GlobalLocalGridPair(grid_atm_sub, grid_ism, up_transform, down_transform)    
+        
     region_data = mean_to_global_mec([frac_ism.data, topo_ism.data],
                                                 [True, False],
                                                 topo_ism.data, mask_ism,
-                                                topo_max_atm, ism_to_atm_map,
+                                                topo_max_atm, 
+                                                grid_pair.local_to_global_map,
                                                 area_atm_sub.shape)
 
-    frac_cover = fraction_covered(up_transform, down_transform, grid_atm_sub, grid_ism)
+    frac_cover = fraction_covered(grid_pair)
     global_data = [ice_frac_atm, topo_atm]
     global_data = [splice_global(g, r , frac_cover, ilo, ihi)
                    for g,r in zip(global_data, region_data)]

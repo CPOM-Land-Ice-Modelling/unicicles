@@ -49,17 +49,19 @@ def map_and_fractions():
     lon = np.linspace(dlon/2.0, 360.0-dlon/2.0, nlon)
     lat = np.linspace(-90+dlat/2, -60-dlat/2, nlat)
     global_grid = Uniform2DGrid(lon, lat)
-    lgm =  local_to_global_map(up, down, global_grid, local_grid)
-    fr = fraction_covered(up, down, global_grid, local_grid)
+    
+    grid_pair = GlobalLocalGridPair(global_grid, local_grid, up, down)
+    
+    fr = fraction_covered(grid_pair)
 
 
     fig, axs = plt.subplots(1, 2, figsize=(8,4))
 
     ax= axs[0]
     ax.set_aspect('equal')
-    ax.pcolormesh(x, y, lgm%20, cmap='tab20c')
+    ax.pcolormesh(x, y, grid_pair.local_to_global_map%20, cmap='tab20c')
 
-    lon_ism, lat_ism = up(*local_grid.coords)
+    lon_ism, lat_ism = up(*grid_pair.local_grid.coords)
 
     def cf(ax, xx, yy, z, zl, label=True):
         cs = ax.contour(xx, yy, z, zl,
@@ -79,7 +81,7 @@ def map_and_fractions():
     ax.set_xticks(lon + dlon/2)
     ax.grid(color='k',lw=0.5)
     
-    return lgm, fr
+    return grid_pair.local_to_global_map, fr
 
 class TestTranformation(unittest.TestCase):    
 
