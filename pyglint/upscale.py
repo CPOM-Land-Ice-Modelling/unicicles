@@ -32,74 +32,28 @@ def local_to_global_cell_agg(field, topo, mask, topo_max, indx):
 
     return field_sum, field_count, field_count_col
 
-def mean_to_global_mec_one(field, lcolfrac, topo, mask, topo_max, local_to_global_map,
+
+def mean_to_global_mec(fields, col_means, topo, mask, topo_max, local_to_global_map,
                        global_shape, missing_val = missing):
     """
 
-    Compute the means of 2D field on the global 3D grid.
+    Compute the means of 2D fields on the global 3D grid.
     Cell values will be non-zero where the 2D surface elevation (topo)
     intersects the cell. Cell vertical boundaries are defined
     by topo_max
-
-    Parameters
-    ----------
-    field : numpy.ndarray / float 2D array
-        field on the local grid
-    topo : numpy.ndarray / float 2D array
-        surface elevation on the local grid
-    topo_max : numpy.ndarray / float 1D array
-        elevation class limits
-    local_to_global_map : 2D array with
-        global grid cell ID for each local grid cell
-    global_shape : (int, int, int)
-        shape of the global grid
-    lcolfrac : bool, optional
-        If true, mean computed over global column, if false mean
-        computef over the gobal cell. The default is False.
-
-    Returns
-    -------
-    global_field : numpy.ndarray / float 3D array
-        means of input field for each global cell
-
-    """
-
-
-    __, nj_global, ni_global = global_shape
-    global_field = np.full(global_shape, missing_val)
-
-    def cellid(i_global,j_global):
-        return cell_id(i_global,j_global,ni_global,nj_global)
-
-    for i in range(0, ni_global):
-        for j in range(0, nj_global):
-                indx = mask & (local_to_global_map  == cellid(i,j))
-                
-                fsum, count, count_col  = local_to_global_cell_agg( \
-                        field, topo, mask, topo_max, indx)
     
-                if lcolfrac:
-                    if count_col > 0:
-                        global_field[:, j, i] = fsum/count_col
-                else:
-                    valid = count > 0
-                    global_field[valid, j, i] = fsum[valid]/count[valid]
-
-    return global_field
-
-def mean_to_global_mec(fields, lcolfracs, topo, mask, topo_max, local_to_global_map,
-                       global_shape, missing_val = missing):
-    """
-
-    Compute the means of 2D field on the global 3D grid.
-    Cell values will be non-zero where the 2D surface elevation (topo)
-    intersects the cell. Cell vertical boundaries are defined
-    by topo_max
+    There is a substantial effiency benefit to calling 
+    once with a list of n fields than n times with 1 field 
 
     Parameters
     ----------
-    field : numpy.ndarray / float 2D array
-        field on the local grid
+    field : list[numpy.ndarray / float 2D array]
+        fields on the local grid.
+        
+    lcolfracs : list[bool], optional
+            If col_means[i] == true, mean of field[i] computed 
+            over global column, if false mean computed over the gobal cell.  
+            
     topo : numpy.ndarray / float 2D array
         surface elevation on the local grid
     topo_max : numpy.ndarray / float 1D array
@@ -108,9 +62,7 @@ def mean_to_global_mec(fields, lcolfracs, topo, mask, topo_max, local_to_global_
         global grid cell ID for each local grid cell
     global_shape : (int, int, int)
         shape of the global grid
-    lcolfrac : bool, optional
-        If true, mean computed over global column, if false mean
-        computef over the gobal cell. The default is False.
+
 
     Returns
     -------
@@ -122,9 +74,8 @@ def mean_to_global_mec(fields, lcolfracs, topo, mask, topo_max, local_to_global_
     if not isinstance(fields, list):
         raise TypeError('fields must be a list')
 
-    if not isinstance(lcolfracs, list):
+    if not isinstance(col_means, list):
         raise TypeError('lcolfracs must be a list')
-
 
     __, nj_global, ni_global = global_shape
     global_fields = [np.full(global_shape, missing_val) for field in fields]
@@ -134,13 +85,14 @@ def mean_to_global_mec(fields, lcolfracs, topo, mask, topo_max, local_to_global_
 
     for i in range(0, ni_global):
         for j in range(0, nj_global):
-            for global_field, field, lcolfrac in zip(global_fields, fields, lcolfracs):
-                indx = mask & (local_to_global_map  == cellid(i,j))
+            indx = mask & (local_to_global_map  == cellid(i,j))
+            for global_field, field, col_mean in \
+                zip(global_fields, fields, col_means):
                 
                 fsum, count, count_col  = local_to_global_cell_agg( \
                         field, topo, mask, topo_max, indx)
     
-                if lcolfrac:
+                if col_mean:
                     if count_col > 0:
                         global_field[:, j, i] = fsum/count_col
                 else:
