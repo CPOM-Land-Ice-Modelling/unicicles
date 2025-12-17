@@ -17,91 +17,70 @@ def delta_h_snow(h_ice, h_snow, thresh=50.0):
     return np.where( h_ice < thresh,  
                       np.where ( h_snow > thresh, - h_snow, h_ice), 0.0)
     
-
-def glint_conservation_adjust0(f2d_ism_nc, mask_ism,  
-                              f3d_atm, area_atm,  valid_atm,
-                              grid_pair):
-
-
-
-    # conservation enforcement - see glint_downscaling_gcm
-    # roughly - adjust smb so that the total smb_ism within an
-    # atmosphere grid box equals the smb_atm integrated vertically.
-    # this resembles the glint code. blocky.
-    # there is a NASTY! comment in the glint code
-    f2d_ism = np.zeros(f2d_ism_nc.shape) + f2d_ism_nc
-
-    ism_to_atm_map = grid_pair.local_to_global_map
-    grid_ism = grid_pair.local_grid
-    grid_atm = grid_pair.global_grid
-
-
-    dx, dy = grid_ism.spacing # \todo - move to Uniform2DGrid
-
-    smb_adjust = np.zeros(grid_atm.array_shape)
-    N, M  = grid_atm.array_shape
-    for I in grid_atm.axes_index[0]:
-        for J in grid_atm.axes_index[1]:
-            if np.any(valid_atm[:, J, I]):
-
-                cc = cell_id(I, J, M, N)
-
-                # vertical sum
-                atm_col_total = np.sum(f3d_atm[:, J, I]*area_atm[:, J, I])
-
-                # horizontal sum
-                w = np.where(ism_to_atm_map == cc, 1.0, 0.0)
-                ism_total = dx**2 * np.sum(w*f2d_ism)
-                ism_area =  dx**2 * np.sum(w)
-
-                if ism_area > 0:
-                    smb_adjust[J, I] = (atm_col_total - ism_total)/ism_area
-                    f2d_ism += w * smb_adjust[J, I]
-
-    return np.ma.masked_array(f2d_ism, ~mask_ism)
-
 def glint_conservation_adjust(f2d_ism_nc, mask_ism,  
                               f3d_atm, area_atm,  valid_atm,
                               grid_pair):
 
-
-
+    
     # conservation enforcement - see glint_downscaling_gcm
     # roughly - adjust smb so that the total smb_ism within an
     # atmosphere grid box equals the smb_atm integrated vertically.
     # this resembles the glint code. blocky.
     # there is a NASTY! comment in the glint code
-    f2d_ism = np.zeros(f2d_ism_nc.shape) + f2d_ism_nc
+    # optmized with the help of co-pilot  
+
+    f2d_ism = np.array(f2d_ism_nc, copy=True)
 
     ism_to_atm_map = grid_pair.local_to_global_map
     grid_ism = grid_pair.local_grid
     grid_atm = grid_pair.global_grid
 
+    dx, dy = grid_ism.spacing 
+    area_factor = dx * dy
 
-    dx, dy = grid_ism.spacing # \todo - move to Uniform2DGrid
+    # Number of atmosphere cells expected (cell_id produces indices in [0, N*M-1])
+    N, M = grid_atm.array_shape
+    atm_cell_count = N * M
 
-    smb_adjust = np.zeros(grid_atm.array_shape)
-    N, M  = grid_atm.array_shape
-    for I in grid_atm.axes_index[0]:
-        for J in grid_atm.axes_index[1]:
-            if np.any(valid_atm[:, J, I]):
+    # Compute vertical-integrated atm column totals safely: zero out invalid vertical entries
+    # f3d_atm and area_atm shapes: (lev, N, M) -> sum over axis=0 results in (N, M)
+    atm_col_total_2d = np.sum(np.where(valid_atm, f3d_atm * area_atm, 0.0), axis=0)
 
-                cc = cell_id(I, J, M, N)
+    # Flatten to length N*M with C-order so that index cc = J*M + I matches cell_id(I,J,M,N)
+    atm_col_total_flat = atm_col_total_2d.ravel(order='C')
 
-                # vertical sum
-                atm_col_total = np.sum(f3d_atm[:, J, I]*area_atm[:, J, I])
+    # Prepare flattened local mappings and local smb
+    mapped_ids = ism_to_atm_map.ravel(order='C').astype(np.int64)
+    f2d_flat = f2d_ism.ravel(order='C')
+    m2d_flat = np.where(mask_ism.ravel(order='C'),1.0,0.0)
 
-                # horizontal sum
-                ism_total = dx**2 * np.sum(np.where(ism_to_atm_map == cc, f2d_ism, 0.0))
-                ism_area =  dx**2 * np.sum(np.where(ism_to_atm_map == cc, 1.0, 0.0))
+    # Sum f2d_ism per atm-cell and count number of local cells per atm-cell
+    ism_total_flat = area_factor * np.bincount(mapped_ids, weights=f2d_flat*m2d_flat, minlength=atm_cell_count)
+    ism_area_flat = area_factor * np.bincount(mapped_ids, minlength=atm_cell_count)
+    ism_ice_area_flat = area_factor * np.bincount(mapped_ids, weights=m2d_flat, minlength=atm_cell_count)
 
-                if ism_area > 0:
-                    smb_adjust[J, I] = (atm_col_total - ism_total)/ism_area
-                    f2d_ism = np.where(ism_to_atm_map == cc,
-                                       f2d_ism + smb_adjust[J, I],
-                                       f2d_ism)
+    # Compute adjustments only for atm cells that have any valid vertical data and have non-zero ism area
+    atm_valid_flat = np.any(valid_atm, axis=0).ravel(order='C')
+
+    delta_flat = np.zeros(atm_cell_count, dtype=float)
+    nonz = atm_valid_flat & (ism_ice_area_flat > 0.0)
+    if np.any(nonz):
+        delta_flat[nonz] = (atm_col_total_flat[nonz] *  \
+                                ism_ice_area_flat[nonz] / ism_area_flat[nonz]    \
+                                    - ism_total_flat[nonz]) / ism_ice_area_flat[nonz]
+
+    # Apply adjustments to local grid: each local cell gets the delta of its mapped atm cell
+    # For unmapped local cells (flat_map < 0) we do not apply any adjustment (delta_contrib = 0)
+    delta_per_local = np.zeros_like(f2d_flat, dtype=float)
+    # Only assign for mapped local cells to avoid indexing errors
+    delta_per_local = delta_flat[mapped_ids]
+
+    # Update flattened f2d and reshape back
+    f2d_flat += delta_per_local
+    f2d_ism = f2d_flat.reshape(f2d_ism.shape, order='C')
 
     return np.ma.masked_array(f2d_ism, ~mask_ism)
+
 
 
 def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
@@ -159,7 +138,7 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
         (np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
          for f_xyz in (stemp_xyz, smb_xyz, snow_xyz, shflx_xyz))
 
-    if False and not isinstance(area_atm, type(None)):
+    if True and not isinstance(area_atm, type(None)):
         smb_ism, snow_ism, shflx_ism = [glint_conservation_adjust(
                             f_ism, mask_ism, 
                             f_atm, area_atm, valid_atm,
