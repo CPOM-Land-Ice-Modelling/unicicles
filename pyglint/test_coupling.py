@@ -105,16 +105,12 @@ def plot_atm_coupler_inputs(grid, area, topo, topo_max,
     fig.colorbar(pc,ax=ax,shrink=0.5, label = r'$h_s$ (m)')
     ax.set_title('Vertically integrated snow depth')
     
-def plot_ism_coupler_inputs(grid, topo, thk, calv, frac, mask):
-    ...
-    
-    
-    
 def plot_ism_heatmap(fig, ax, grid, lon, lat, var,  
                      title='', cmap='bwr',vmin=None, vmax=None,):
     
     ax.set_aspect('equal')
     ax.set_yticks([])
+    ax.set_title(title)
     pc = ax.pcolormesh(*km(*grid.axes),var,cmap=cmap,
                        vmin=vmin,vmax=vmax)
     fig.colorbar(pc,ax=ax,shrink=0.5)
@@ -122,7 +118,32 @@ def plot_ism_heatmap(fig, ax, grid, lon, lat, var,
     #cf(ax,*km(*grid.axes), lon, lon_lab)
     #lat_lab = np.arange(lat.min().round(-1), lat.max().round(-1),10)
     #cf(ax,*km(*grid.axes),lat, lat_lab)
-    #cf(ax, frac, [0.05], label=False)
+    #cf(ax, frac, [0.05], label=False)    
+    
+    
+def plot_ism_coupler_inputs(grid, topo, thk, calv, frac, mask, up_tr):
+    ... 
+    
+    def m(z):
+        return np.ma.masked_array(z, frac < 1.0e-10)
+    
+    fig, axs = plt.subplots(2,2, figsize=(8,11))
+    fig.suptitle('Coupler inputs <- ice sheet ')
+    lon, lat = up_tr(*grid.coords)
+    
+    
+    
+    plot_ism_heatmap(fig, axs.flat[0], grid, lon, lat, m(topo), title='topo',
+                 vmin=0,vmax=5000, cmap='plasma')
+    plot_ism_heatmap(fig, axs.flat[1], grid, lon, lat, m(calv), 
+                     title='calving flux',cmap='bwr',vmin=-1,vmax=1)
+    plot_ism_heatmap(fig, axs.flat[2], grid, lon, lat, m(frac), 
+                 title=r'ice frac',vmin=0,vmax=1, cmap='tab20c')
+    plot_ism_heatmap(fig, axs.flat[3], grid, lon, lat, m(thk), 
+                 title=r'ice thickness',vmin=0,vmax=5000, cmap='plasma')
+
+    
+
 
 
 def plot_ism_coupler_outputs(grid, smb, stemp, delta_snow, shflx, up_tr):
@@ -130,7 +151,7 @@ def plot_ism_coupler_outputs(grid, smb, stemp, delta_snow, shflx, up_tr):
     lon, lat = up_tr(*grid.coords)
     
     fig, axs = plt.subplots(2,2, figsize=(8,11))
-    
+    fig.suptitle('Coupler outputs -> ice sheet ')
     plot_ism_heatmap(fig, axs.flat[0], grid, lon, lat, smb, title='SMB',
                      vmin=-1,vmax=1, cmap='bwr_r')
     plot_ism_heatmap(fig, axs.flat[1], grid, lon, lat, stemp, title='Temp',
@@ -144,7 +165,7 @@ def plot_ism_coupler_outputs(grid, smb, stemp, delta_snow, shflx, up_tr):
 
     
 def plot_atm_coupler_outputs(grid, area,  frac, topo, delta_snow, hflx, calv):    
-    fig, axs = plt.subplots(4,1,figsize=(8,11), sharex=True)
+    fig, axs = plt.subplots(3,1,figsize=(8,11), sharex=True)
     fig.suptitle('Coupler outputs -> atmosphere')
     
     ax = axs.flat[0]
@@ -185,7 +206,8 @@ grid_gris, topo_gris, thk_gris, calv_gris, frac_gris, mask_gris = \
 
 if plot:
     plot_ism_coupler_inputs(grid_gris, topo_gris, thk_gris, 
-                            calv_gris, frac_gris, mask_gris)
+                            calv_gris, frac_gris, mask_gris, up_tr_gris)
+    plt.savefig('bike_to_coupler_gris.png')
 
 #Antarctoca
 up_tr_ais, down_tr_ais = up_down_pair(PROJ_ANTARCTIC_3031)
@@ -194,8 +216,8 @@ grid_ais, topo_ais, thk_ais, calv_ais, frac_ais, mask_ais = \
 
 if plot:
     plot_ism_coupler_inputs(grid_ais, topo_ais, thk_ais, 
-                            calv_ais, frac_ais, mask_ais)
-
+                            calv_ais, frac_ais, mask_ais, up_tr_ais)
+    plt.savefig('bike_to_coupler_ais.png')
 
 #example atmosphere model output (input to the coupler).
 grid_um, area_um, topo_um, topo_max, smb_um, stemp_um, snow_um, shflx_um,  = \
@@ -206,7 +228,7 @@ if plot:
     plot_atm_coupler_inputs(grid_um, area_um, topo_um, topo_max, 
                                 smb_um, stemp_um, snow_um, shflx_um)
 
-
+    plt.savefig('um_to_coupler.png')
 #%% downscaling & upscaling
 
 t = time()
@@ -224,6 +246,7 @@ print(time() - t)
 if plot:
     plot_ism_coupler_outputs(grid_gris, smb_gris, stemp_gris, 
                              delta_snow_gris, shflx_gris, up_tr_gris)
+    plt.savefig('coupler_to_bike_gris.png')
 
 t = time()
 
@@ -232,13 +255,13 @@ smb_ais, stemp_ais, delta_snow_ais, shflx_ais \
                  topo_um, area_um, grid_um,
                  topo_ais, thk_ais, frac_ais, mask_ais, grid_ais,
                  up_tr_ais, down_tr_ais, delta_t)
-
+    
 print(time() - t)
 
 if plot:
     plot_ism_coupler_outputs(grid_ais, smb_ais, stemp_ais, 
                              delta_snow_ais, shflx_ais, up_tr_ais)
-
+    plt.savefig('coupler_to_bike_ais.png')
 
 
 um_shape = smb_um.shape
@@ -274,3 +297,4 @@ print(time() - t)
 if plot:
     plot_atm_coupler_outputs(grid_um, area_um, frac_um, topo_um, delta_snow_um, 
                              hlfx_um, calv_um)
+    plt.savefig('coupler_to_um.png')
