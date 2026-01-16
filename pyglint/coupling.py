@@ -13,14 +13,58 @@ from transformation import  Uniform2DGrid, Box, GlobalLocalGridPair
 
 
 def delta_h_snow(h_ice, h_snow, thresh=50.0):
+    """Calculate change in snow depth due to snow-to-ice conversion.
     
+    In thin ice areas (below threshold), convert thick snow to ice
+    or convert all ice to snow where snow is thin (below threshold). 
+
+    How it was in GLINT even if it seems a bit odd.
+
+    Parameters
+    ----------
+    h_ice : ndarray
+        Ice thickness (m).
+    h_snow : ndarray
+        Snow depth (m).
+    thresh : float, optional
+        Ice thickness threshold (m) below which snow converts to ice. Default is 50.0 m.
+    
+    Returns
+    -------
+    ndarray
+        Change in snow depth (m). Negative values indicate snow loss due to conversion.
+    """
     return np.where( h_ice < thresh,  
                       np.where ( h_snow > thresh, - h_snow, h_ice), 0.0)
     
 def glint_conservation_adjust(f2d_ism_nc, mask_ism,  
                               f3d_atm, area_atm,  valid_atm,
                               grid_pair):
-
+    """Enforce conservation of atmospheric fields when downscaling to ice sheet grid.
+    
+    Adjusts local ice-sheet grid values so that the total field within each 
+    atmosphere grid cell equals the vertically-integrated atmospheric column total.
+    
+    Parameters
+    ----------
+    f2d_ism_nc : ndarray
+        2D field on ice sheet grid (e.g., surface mass balance).
+    mask_ism : ndarray
+        Boolean mask indicating ice-covered cells on ice sheet grid.
+    f3d_atm : ndarray
+        3D field on atmospheric grid, shape (lev, N, M).
+    area_atm : ndarray
+        Cell areas on atmospheric grid.
+    valid_atm : ndarray
+        Boolean mask of valid atmospheric data, shape (lev, N, M).
+    grid_pair : GlobalLocalGridPair
+        Mapping between atmospheric and ice sheet grids.
+    
+    Returns
+    -------
+    np.ma.MaskedArray
+        Adjusted 2D field on ice sheet grid with conservation applied.
+    """
     
     # conservation enforcement - see glint_downscaling_gcm
     # roughly - adjust smb so that the total smb_ism within an
@@ -84,7 +128,28 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism,
 
 
 def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
-
+    """Crop global atmospheric fields to region containing ice sheet domain.
+    
+    Extracts the minimal atmospheric region needed to cover the ice sheet
+    domain, reducing computational cost for downscaling operations.
+    
+    Parameters
+    ----------
+    arrs_global : list of ndarray
+        Global atmospheric fields to crop, shape (..., N, M).
+    grid_atm : Uniform2DGrid
+        Atmospheric grid description.
+    grid_ism : Uniform2DGrid
+        Ice sheet grid description.
+    up_transform : callable
+        Transformation function from ice sheet to atmospheric coordinates.
+    
+    Returns
+    -------
+    list
+        Cropped fields, cropped atmospheric grid, and crop indices (ilo, ihi).
+    """
+    
     # subset
     lon_ism, lat_ism = up_transform(*grid_ism.coords)
     dlon, dlat = ( np.max(np.abs(ll[1:] - ll[:-1])) for ll in  grid_atm.axes)
@@ -109,9 +174,57 @@ def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
 def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,  
                topo_atm, area_atm,  grid_atm,
                topo_ism, lithk_ism, frac_ism, mask_ism, grid_ism,
-               up_transform,  down_transform, time_step):
-
+               up_transform,  down_transform, time_step, 
+               conservation=True, snow_to_ice=True): 
+    """Downscale atmospheric fields to ice sheet grid.
     
+    Interpolates atmospheric surface mass balance, temperature, snow, and heat flux
+    to the ice sheet grid.
+
+    Optionally applies conservation adjustment and snow-to-ice conversion.
+
+    Parameters
+    ----------
+    smb_atm : np.ma.MaskedArray
+        Surface mass balance on atmospheric grid (kg m-2 s-1).
+    stemp_atm : np.ma.MaskedArray
+        Surface temperature on atmospheric grid (K).
+    snow_atm : np.ma.MaskedArray
+        Snow mass on atmospheric grid (kg m-2).
+    shflx_atm : np.ma.MaskedArray
+        Sensible heat flux on atmospheric grid (W m-2).
+    topo_atm : ndarray
+        Topography on atmospheric grid (m).
+    area_atm : np.ma.MaskedArray
+        Cell areas on atmospheric grid (m2).
+    grid_atm : Uniform2DGrid
+        Atmospheric grid description.
+    topo_ism : ndarray
+        Topography on ice sheet grid (m).
+    lithk_ism : ndarray
+        Ice thickness on ice sheet grid (m).
+    frac_ism : np.ma.MaskedArray
+        Ice fraction on ice sheet grid.
+    mask_ism : ndarray
+        Boolean mask of ice-covered cells on ice sheet grid.
+    grid_ism : Uniform2DGrid
+        Ice sheet grid description.
+    up_transform : callable
+        Transformation from ice sheet to atmospheric coordinates.
+    down_transform : callable
+        Transformation from atmospheric to ice sheet coordinates.
+    time_step : float
+        Time step for integration (s).
+    conservation : bool, optional
+        Whether to apply conservation adjustment. Default is True.
+    snow_to_ice : bool, optional
+        Whether to convert snow to ice in thin ice areas. Default is True.
+
+    Returns
+    -------
+    tuple of np.ma.MaskedArray
+        (smb_ism, stemp_ism, delta_snow_ism, shflx_ism) - downscaled fields on ice sheet grid.
+    """
     
     smb_atm, stemp_atm, snow_atm, shflx_atm, topo_atm, area_atm, grid_atm, \
     ilo, ihi = \
@@ -138,7 +251,7 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
         (np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
          for f_xyz in (stemp_xyz, smb_xyz, snow_xyz, shflx_xyz))
 
-    if True and not isinstance(area_atm, type(None)):
+    if conservation and not isinstance(area_atm, type(None)):
         smb_ism, snow_ism, shflx_ism = [glint_conservation_adjust(
                             f_ism, mask_ism, 
                             f_atm, area_atm, valid_atm,
@@ -146,16 +259,41 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
                 for f_ism, f_atm in zip([smb_ism, snow_ism, shflx_ism],
                                  [smb_atm, snow_atm, shflx_atm])]
         
-        
-    #snow to ice conversion - store *change in* snow depth in snow_ism    
-    delta_snow_ism = np.ma.masked_array(delta_h_snow(lithk_ism, snow_ism), ~mask_ism)
-    smb_ism -= delta_snow_ism / time_step 
+    if snow_to_ice:  
+        #snow to ice conversion - store *change in* snow depth in snow_ism    
+        delta_snow_ism = np.ma.masked_array(delta_h_snow(lithk_ism, snow_ism), ~mask_ism)
+        smb_ism -= delta_snow_ism / time_step 
+    else:
+        delta_snow_ism = np.ma.masked_array( np.zeros_like(smb_ism.data), ~mask_ism)
 
     return smb_ism, stemp_ism, delta_snow_ism, shflx_ism
 
 
 def splice_global(global_arr, region_arr, frac_cover,  ilo, ihi):
-
+    """Blend regional ice sheet data into global atmospheric field.
+    
+    Replaces global field values in region with weighted blend of regional
+    and global data, using ice coverage fraction as weight.
+    
+    Parameters
+    ----------
+    global_arr : ndarray
+        Global field array, shape (..., N, M).
+    region_arr : ndarray
+        Regional field array, shape (..., n, m).
+    frac_cover : ndarray
+        Ice coverage fraction, shape (n, m) - weight for regional vs global.
+    ilo : int
+        Lower latitude index of region in global array.
+    ihi : int
+        Upper latitude index of region in global array.
+    
+    Returns
+    -------
+    ndarray
+        Modified global array with regional data blended in.
+    """
+    
     global_arr[:,ilo:ihi,:] = region_arr*frac_cover + (1.0-frac_cover)*global_arr[:,ilo:ihi,:]
 
     return global_arr
@@ -166,6 +304,53 @@ def ism_to_atm(topo_max_atm, area_atm, grid_atm,
                hflx_ism, d_snow_ism, calv_ism,
                mask_ism, grid_ism,
                up_transform, down_transform):
+    """Upscale ice sheet fields to atmospheric grid.
+    
+    Computes area-weighted means of ice sheet fields (ice fraction, topography,
+    snow depth, heat flux, calving) on the atmospheric grid.
+    
+    Parameters
+    ----------
+    topo_max_atm : ndarray
+        Maximum topography on atmospheric grid (m).
+    area_atm : np.ma.MaskedArray
+        Cell areas on atmospheric grid (m2).
+    grid_atm : Uniform2DGrid
+        Atmospheric grid description.
+    ice_frac_atm : np.ma.MaskedArray
+        Ice fraction on atmospheric grid (output array).
+    delta_snow_atm : np.ma.MaskedArray
+        Change in snow depth on atmospheric grid (m, output array).
+    hflux_atm : np.ma.MaskedArray
+        Heat flux on atmospheric grid (W m-2, output array).
+    calv_atm : np.ma.MaskedArray
+        Calving flux on atmospheric grid (kg m-2 s-1, output array).
+    topo_atm : np.ma.MaskedArray
+        Topography on atmospheric grid (m, output array).
+    topo_ism : ndarray
+        Ice sheet surface topography (m).
+    frac_ism : np.ma.MaskedArray
+        Ice coverage fraction on ice sheet grid.
+    hflx_ism : np.ma.MaskedArray
+        Heat flux on ice sheet grid (W m-2).
+    d_snow_ism : np.ma.MaskedArray
+        Snow depth change on ice sheet grid (m).
+    calv_ism : np.ma.MaskedArray
+        Calving flux on ice sheet grid (kg m-2 s-1).
+    mask_ism : ndarray
+        Boolean mask of ice-covered cells on ice sheet grid.
+    grid_ism : Uniform2DGrid
+        Ice sheet grid description.
+    up_transform : callable
+        Transformation from ice sheet to atmospheric coordinates.
+    down_transform : callable
+        Transformation from atmospheric to ice sheet coordinates.
+    
+    Returns
+    -------
+    list
+        Updated atmospheric fields: [ice_frac_atm, topo_atm, delta_snow_atm, hflux_atm, calv_atm].
+    """
 
     # GLINT 3D ouputs : gtopo - ice sheet surface,
     #                   gfrac - ice covered fraction

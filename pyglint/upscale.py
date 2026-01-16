@@ -11,13 +11,58 @@ from transformation import cell_id, missing
 
 
 def subset_ec(topo, topo_max, ec):
+    """Identify grid points within a specific elevation class.
+    
+    Creates a boolean mask for grid points whose surface elevation falls
+    within the specified elevation class boundaries.
+    
+    Parameters
+    ----------
+    topo : ndarray
+        Surface elevation values, any shape.
+    topo_max : ndarray
+        Sorted elevation class boundaries (1D). Class ec spans
+        [topo_max[ec], topo_max[ec+1]).
+    ec : int
+        Elevation class index.
+    
+    Returns
+    -------
+    ndarray (bool)
+        Boolean mask where True indicates points in elevation class ec.
+    """
     return (topo < topo_max[ec+1]) & (topo >= topo_max[ec])
 
 
 
 def local_to_global_cell_agg(field, topo, mask, topo_max, indx):
-
+    """Aggregate field values within a global grid cell by elevation class.
     
+    Computes sums and counts of field values across elevation classes for a
+    single global grid cell. Used as a helper for upscaling operations.
+    
+    Parameters
+    ----------
+    field : ndarray
+        2D field on local grid.
+    topo : ndarray
+        2D surface elevation on local grid.
+    mask : ndarray
+        Boolean mask of valid cells on local grid.
+    topo_max : ndarray
+        1D array of elevation class boundaries.
+    indx : ndarray (bool)
+        Boolean index array for cells belonging to this global cell.
+    
+    Returns
+    -------
+    field_sum : ndarray
+        Sum of field values in each elevation class, shape (nec,).
+    field_count : ndarray
+        Count of valid points in each elevation class, shape (nec,).
+    field_count_col : int
+        Total count of valid points in the column.
+    """
     nec = len(topo_max) - 1  # 0,z1,z2,,,,zn
     field_sum = np.zeros(nec)
     field_count = np.zeros(nec)

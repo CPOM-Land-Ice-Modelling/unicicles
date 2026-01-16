@@ -29,7 +29,7 @@ def read_ism_nc(nc_file):
 
 def read_atm_nc(nc_file):
     
-    nc_um_in = Dataset('atmos_cx209c_P1Y_20000101-20010101_icecouple.nc','r')
+    nc_um_in = Dataset(nc_file,'r')
     ilo, ihi = 148, 188
     jlo, jhi = 119, 140
     ilo, ihi = 0, -1

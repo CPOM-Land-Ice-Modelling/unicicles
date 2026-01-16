@@ -16,6 +16,26 @@ PROJ_ANTARCTIC_3031 = '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +x_0=0 +y_0=0
 PROJ_ARCTIC_4326 = '+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
 
 def cell_id(i, j, ni, nj):
+    """
+    Convert 2D grid indices to a linear cell identifier.
+    
+    Parameters
+    ----------
+    i : int or array-like
+        x-axis index
+    j : int or array-like
+        y-axis index
+    ni : int
+        Size of x-axis
+    nj : int
+        Size of y-axis
+    
+    Returns
+    -------
+    int or array-like
+        Linear cell identifier(s)
+    """
+    
     return i + ni * j
 
 class Box:
@@ -24,6 +44,16 @@ class Box:
     """
 
     def __init__(self, lo, hi):
+        """
+        Initialize a rectangular box defined by lower and upper corner vectors.
+
+        Parameters
+        ----------
+        lo : array-like
+            Lower corner coordinates (x_min, y_min)
+        hi : array-like
+            Upper corner coordinates (x_max, y_max)
+        """
         self._lo = lo
         self._hi = hi
 
@@ -48,6 +78,21 @@ class Uniform2DGrid:
     """
 
     def __init__(self, x, y):
+        """
+        Initialize a 2D grid with uniform spacing in both axes.
+
+        Parameters
+        ----------
+        x : array-like
+            Strictly ascending x-axis coordinates with uniform spacing
+        y : array-like
+            Strictly ascending y-axis coordinates with uniform spacing
+
+        Raises
+        ------
+        ValueError
+            If x or y are not strictly ascending or not uniformly spaced
+        """
 
         #check x, y ascending
         for xi in (x, y):
@@ -93,6 +138,20 @@ class Uniform2DGrid:
         return self._coords
 
     def crop(self, crop_box):
+        """
+        Extract a subset of the grid within specified bounds.
+
+        Parameters
+        ----------
+        crop_box : Box
+            Box defining the region to extract
+
+        Returns
+        -------
+        Uniform2DGrid
+            New grid containing only cells within crop_box
+        """
+
         #axes = (x[np.where((x >= l) & (x <= h))] \
         #        for x,l,h in zip(self._axes, crop_box.lo, crop_box.hi))
 
@@ -113,6 +172,24 @@ def local_to_global_map_up(up_transform, global_grid, local_grid):
 
 def local_to_global_map_down(down_transform, global_grid, local_grid):
 
+    """
+    Map local grid cells to global grid cells using downscaling transformation.
+
+    Parameters
+    ----------
+    down_transform : function(lon, lat) -> (x, y)
+        Transform from global to local coordinates
+    global_grid : Uniform2DGrid
+        Global grid specification
+    local_grid : Uniform2DGrid
+        Local grid specification
+
+    Returns
+    -------
+    numpy.ndarray
+        Global grid cell indices corresponding to local grid points
+    """
+
     ig, jg = global_grid.axes_index
     ng, mg = global_grid.array_shape
     ii, jj = np.meshgrid(ig, jg)
@@ -125,6 +202,33 @@ def local_to_global_map_down(down_transform, global_grid, local_grid):
 def local_to_global_map(up_transform, down_transform, 
                         global_grid, local_grid, method="down"):
     
+    """
+    Map local grid cells to global grid cells using specified transformation method.
+
+    Parameters
+    ----------
+    up_transform : function(x, y) -> (lon, lat)
+        Transform from local to global coordinates
+    down_transform : function(lon, lat) -> (x, y)
+        Transform from global to local coordinates
+    global_grid : Uniform2DGrid
+        Global grid specification
+    local_grid : Uniform2DGrid
+        Local grid specification
+    method : str, default "down"
+        Method to use: "down" for downscaling or "up" for upscaling
+
+    Returns
+    -------
+    numpy.ndarray
+        Global grid cell indices corresponding to local grid points
+
+    Raises
+    ------
+    ValueError
+        If method is not "down" or "up"
+    """
+
     if method == "down":
         return local_to_global_map_down(down_transform, 
                                         global_grid, local_grid)
@@ -139,6 +243,21 @@ def local_to_global_map(up_transform, down_transform,
 
 class GlobalLocalGridPair:
     
+    """
+    Container for paired global and local grids with coordinate transformations.
+
+    Parameters
+    ----------
+    global_grid : Uniform2DGrid
+        Global grid specification
+    local_grid : Uniform2DGrid
+        Local grid specification
+    up_transform : function(x, y) -> (lon, lat)
+        Transform from local to global coordinates
+    down_transform : function(lon, lat) -> (x, y)
+        Transform from global to local coordinates
+    """
+
     def __init__(self, global_grid, local_grid, up_transform, down_transform):
         self._global_grid = global_grid
         self._local_grid = local_grid
@@ -172,7 +291,28 @@ class GlobalLocalGridPair:
 
 
 def up_down_pair(proj):
+    """
+    Create bidirectional coordinate transformation functions from a projection.
 
+    Parameters
+    ----------
+    proj : str or pyproj.Proj
+        Projection specification as PROJ string or Proj object
+
+    Returns
+    -------
+    tuple of (function, function)
+        (up_transform, down_transform) where:
+        - up_transform(x, y) converts local to global (lon, lat) coordinates
+        - down_transform(lon, lat) converts global to local (x, y) coordinates
+
+    Raises
+    ------
+    ValueError
+        If proj is a string but not recognized as valid PROJ format
+    TypeError
+        If proj is neither string nor Proj object
+    """
     if isinstance(proj, str):
         if proj[0:5] == "+proj":
             #seems to be a proj string, so
@@ -274,7 +414,7 @@ def fraction_covered(grid_pair):
     def cellid(i,j):
         return cell_id(i,j,mg,ng)
 
-    #frac_coverage = np.zeros(global_grid.array_shape)
+
     ig, jg = grid_pair.global_grid.axes_index
     indx = cellid(*np.meshgrid(ig, jg)).flat[:]
     a = np.bincount(map_a.flat, minlength=1 + np.max(indx))
