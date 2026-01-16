@@ -152,7 +152,7 @@ def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
     
     # subset
     lon_ism, lat_ism = up_transform(*grid_ism.coords)
-    dlon, dlat = ( np.max(np.abs(ll[1:] - ll[:-1])) for ll in  grid_atm.axes)
+    dlon, dlat = [np.max(np.abs(ll[1:] - ll[:-1])) for ll in  grid_atm.axes]
     bb = Box( [np.min(lon_ism) - dlon, np.min(lat_ism) - dlat],
              [np.max(lon_ism) + dlon, np.max(lat_ism) + dlat])
 
@@ -248,8 +248,8 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
 
 
     stemp_ism, smb_ism, snow_ism, shflx_ism = \
-        (np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
-         for f_xyz in (stemp_xyz, smb_xyz, snow_xyz, shflx_xyz))
+        [np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
+         for f_xyz in [stemp_xyz, smb_xyz, snow_xyz, shflx_xyz]]
 
     if conservation and not isinstance(area_atm, type(None)):
         smb_ism, snow_ism, shflx_ism = [glint_conservation_adjust(
