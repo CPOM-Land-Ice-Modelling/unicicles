@@ -136,7 +136,7 @@ def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
     Parameters
     ----------
     arrs_global : list of ndarray
-        Global atmospheric fields to crop, shape (..., N, M).
+        Global atmospheric fields to crop, all 3D arrays ordered (z,y,x)
     grid_atm : Uniform2DGrid
         Atmospheric grid description.
     grid_ism : Uniform2DGrid
