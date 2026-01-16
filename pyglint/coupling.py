@@ -278,11 +278,11 @@ def splice_global(global_arr, region_arr, frac_cover,  ilo, ihi):
     Parameters
     ----------
     global_arr : ndarray
-        Global field array, shape (..., N, M).
+        Global field array, 3D ordered(z,lat,lon)
     region_arr : ndarray
-        Regional field array, shape (..., n, m).
+        Regional field array, 3D ordered (z,lat,lon).
     frac_cover : ndarray
-        Ice coverage fraction, shape (n, m) - weight for regional vs global.
+        Ice coverage fraction, 2D ordered(lat, lon) 
     ilo : int
         Lower latitude index of region in global array.
     ihi : int
