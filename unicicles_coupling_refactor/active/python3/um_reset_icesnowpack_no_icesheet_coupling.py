@@ -102,8 +102,7 @@ if __name__ == "__main__":
 
     # 4. elev_ice snowpacks
     print("Resetting ice tile snow mass")
-    um_dump = reset_icetile_snowpack(um_dump, toice_file, coupling_period,
-                                     real_tile_only=True)
+    um_dump = reset_icetile_snowpack(um_dump, toice_file, coupling_period)
 
     # Output the modified dump
     print("Writing UM output")
