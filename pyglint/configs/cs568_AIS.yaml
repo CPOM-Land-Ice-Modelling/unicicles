@@ -1,6 +1,6 @@
 icesheet: AIS
-suiteID: cs568
+suite_id: cs568
 input_dir: /gws/ssde/j25b/terrafirma/tm17544/UKESM/raw_data
 nc_file: bike_cf_ais3031.nc
-fl_gr_mask: False
-num_files: 50
+gr_fl_mask: False
+num_files: 11

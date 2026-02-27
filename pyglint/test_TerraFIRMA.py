@@ -19,14 +19,12 @@ from transformation import PROJ_ARCTIC_4326, PROJ_ANTARCTIC_3031
 
 # Utility: load YAML config
 def load_config(config_path):
-
     with open(config_path) as f:
         return yaml.safe_load(f)
     
 
 # Utility: get Git info
 def get_git_info():
-
     try:
         commit = subprocess.check_output(
             ['git', 'rev-parse', 'HEAD']
@@ -147,9 +145,6 @@ def get_files_to_process(input_dir, start_pattern, num_files=None):
 # test_TerraFIRMA main function
 def test_terrafirma(cfg):
 
-    print("Starting TerraFIRMA test with config:")
-    print(cfg)
-
     if cfg['icesheet'] == 'AIS':
         up_tr, down_tr = up_down_pair(PROJ_ANTARCTIC_3031)
 
@@ -160,20 +155,20 @@ def test_terrafirma(cfg):
         raise ValueError(f"Unsupported ice sheet: {cfg['icesheet']}")
 
     grid_ism, topo_ism, thk_ism, calv_ism, frac_ism, mask_ism, gr_mask_ism = \
-        read_ism_nc(cfg['nc_file'])
+        read_ism_nc(cfg)
     
     input_file_path = f"{cfg['input_dir']}/{cfg['suite_id']}/"
 
     files = get_files_to_process(input_file_path, start_pattern='atmos', num_files=cfg.get('num_files', None))
 
-    if cfg['fl_gr_mask']:
+    if cfg['gr_fl_mask']:
         total_smb = np.ndarray(shape=(len(files),4))
     
-    elif not cfg['fl_gr_mask']:
+    elif not cfg['gr_fl_mask']:
         total_smb = np.ndarray(shape=(len(files),2))
 
     else:
-        raise ValueError(f"Unsupported gr_mask flag: {cfg['fl_gr_mask']}")
+        raise ValueError(f"Unsupported gr_mask flag: {cfg['gr_fl_mask']}")
     
     count = 0
 
@@ -183,7 +178,7 @@ def test_terrafirma(cfg):
         print(f"File {count+1}/{len(files)}")
 
         grid_um, area_um, topo_um, topo_max, smb_um, stemp_um, snow_um, shflx_um,  = \
-        read_atm_nc(file)
+            read_atm_nc(file)
 
         delta_t = 1.0 # typical?
 
@@ -212,39 +207,43 @@ def test_terrafirma(cfg):
         total_smb[count,0] = count
         total_smb[count,1] = np.sum(smb)
 
-        if cfg['fl_gr_mask']:
+        if cfg['gr_fl_mask']:
 
             total_smb[count,2] = ma.sum(ma.masked_array(smb, ~gr_mask_ism))
             total_smb[count,3] = ma.sum(ma.masked_array(smb, gr_mask_ism))
         
-        print(f"Total SMB for file {file}: {total_smb[count,1]:.4f} Gt/a")
+        print(f"Total SMB for file {count+1}/{len(files)}: {total_smb[count,1]:.4f} Gt/a")
 
         count += 1
 
-    time = total_smb[:,0]
+    return total_smb
 
-    if cfg["fl_gr_mask"]:
+def save_results(cfg, smb_array, output_dir):
+
+    time = smb_array[:,0]
+
+    if cfg["gr_fl_mask"]:
         ds = xr.Dataset(
         {
-            "total_smb": ("time", total_smb[:,1]),
-            "total_smb_grounded": ("time", total_smb[:,2]),
-            "total_smb_floating": ("time", total_smb[:,3])
+            "total_smb": ("time", smb_array[:,1]),
+            "total_smb_grounded": ("time", smb_array[:,2]),
+            "total_smb_floating": ("time", smb_array[:,3])
         },
         coords = {"time": time} 
         )
         
-    elif not cfg["fl_gr_mask"]:
+    elif not cfg["gr_fl_mask"]:
         ds = xr.Dataset(
             {
-                "total_smb": ("time", total_smb[:,1])
+                "total_smb": ("time", smb_array[:,1])
             },
             coords = {"time": time}
         )
 
     else:
-        raise ValueError(f"Unsupported gr_mask flag: {cfg['fl_gr_mask']}")
+        raise ValueError(f"Unsupported gr_mask flag: {cfg['gr_fl_mask']}")
 
-    ds.to_netcdf(os.path.join(cfg['output_dir'], 'total_smb.nc'))
+    ds.to_netcdf(os.path.join(output_dir, 'pyglint_smb_data.nc'))
 
 # Main test function
 def main():
@@ -256,9 +255,11 @@ def main():
     # Load config
     cfg = load_config(args.config)
 
-    # Timestamped output folder
+    # Label output dir with branch, config and timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = os.path.join('outputs', timestamp)
+    branch_name = get_git_info()['git_branch']
+    config_name = os.path.splitext(os.path.basename(args.config))[0]
+    output_dir = os.path.join('test_outputs', f"{branch_name}_{config_name}_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)
 
     # Redirect stdout/stderr to a log file while still printing to screen
@@ -285,6 +286,14 @@ def main():
         json.dump(git_info, f, indent=2)
 
     # Run the test
-    print("Running pyglint test with config:")
+    print("Running test_TerraFIRMA test with config:")
     print(cfg)
-    test_terrafirma(cfg)   
+    total_smb = test_terrafirma(cfg)
+
+    # Save results
+    save_results(cfg, total_smb, output_dir)
+
+if __name__ == "__main__":
+    main()
+
+
