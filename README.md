@@ -93,4 +93,26 @@ make install
 
 ```
 
+## Testing Notes
 
+### Using TerraFIRMA data
+
+To validate whether pyglint is producing the same integrated SMB over the ice sheets as the Glint code does, we can use the TerraFIRMA data. The SMB as calculated by Glint and passed to BISICLES (for simulations that had active ice sheet components) has been computed using BISICLES filetools.
+
+If we give pyglint the atmos*icecouple.nc files that are produced by the UM and coupling code (the files passed to Glint) we should be able to reproduce the same integrated SMB over the ice sheets as Glint does (allowing for small differences due to different interpolation methods, etc).
+
+The best TerraFIRMA simulation to use for this is labelled u-cs568, a PI-control experiment with interactive ice sheets.
+
+### Testing setup
+
+The code to calculate integracted SMB from the atmos*icecouple.nc files is in the test_TerraFIRMA.py file.
+
+Different versions of pyglint are in different git branches of this repository. To test a particular version of pyglint, checkout the relevant branch and run the test_TerraFIRMA.py file.
+
+The different configuration options are set out in the config/config*.yaml files. To test a particular configuration, pass the relevant config file as an argument to the test_TerraFIRMA.py file. For example:
+
+```bash
+> python test_TerraFIRMA.py --config config/cs568_AIS.yaml
+```
+
+The outputs from the test_TerraFIRMA.py file are saved in csv files in the outputs/ directory, with a timestamped directory name for each test run. This directory also  contains metadata about the test run, including the git branch and commit of pyglint that was used, and the config file used for the test run.

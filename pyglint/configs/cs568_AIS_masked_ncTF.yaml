@@ -1,0 +1,6 @@
+icesheet: AIS
+suiteID: cs568
+input_dir: /gws/ssde/j25b/terrafirma/tm17544/UKESM/raw_data
+nc_file: bike_cx209c_18510101_plot-AIS-lev0-epsg3031.nc
+fl_gr_mask: True
+num_files: 50

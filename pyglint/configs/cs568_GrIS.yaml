@@ -1,0 +1,6 @@
+icesheet: GrIS
+suite_id: cs568
+input_dir: /gws/ssde/j25b/terrafirma/tm17544/UKESM/raw_data
+nc_file: bike_cf_gris4326.nc
+gr_fl_mask: False
+num_files: 50
