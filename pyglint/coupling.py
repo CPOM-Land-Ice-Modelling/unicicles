@@ -59,11 +59,12 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism,
         Boolean mask of valid atmospheric data, shape (lev, N, M).
     grid_pair : GlobalLocalGridPair
         Mapping between atmospheric and ice sheet grids.
-    
     Returns
     -------
     np.ma.MaskedArray
         Adjusted 2D field on ice sheet grid with conservation applied.
+    dict
+        conservation statistics 
     """
     
     # conservation enforcement - see glint_downscaling_gcm
@@ -72,6 +73,8 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism,
     # this resembles the glint code. blocky.
     # there is a NASTY! comment in the glint code
     # optmized with the help of co-pilot  
+    
+    conservation_stats = {}
 
     f2d_ism = np.array(f2d_ism_nc, copy=True)
 
@@ -89,30 +92,44 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism,
     # Compute vertical-integrated atm column totals safely: zero out invalid vertical entries
     # f3d_atm and area_atm shapes: (lev, N, M) -> sum over axis=0 results in (N, M)
     atm_col_total_2d = np.sum(np.where(valid_atm, f3d_atm * area_atm, 0.0), axis=0)
+    
+    conservation_stats['atm_total'] = np.sum(atm_col_total_2d)
 
     # Flatten to length N*M with C-order so that index cc = J*M + I matches cell_id(I,J,M,N)
     atm_col_total_flat = atm_col_total_2d.ravel(order='C')
-
+    
     # Prepare flattened local mappings and local smb
     mapped_ids = ism_to_atm_map.ravel(order='C').astype(np.int64)
     f2d_flat = f2d_ism.ravel(order='C')
     m2d_flat = np.where(mask_ism.ravel(order='C'),1.0,0.0)
-
+    
+ 
     # Sum f2d_ism per atm-cell and count number of local cells per atm-cell
     ism_total_flat = area_factor * np.bincount(mapped_ids, weights=f2d_flat*m2d_flat, minlength=atm_cell_count)
     ism_area_flat = area_factor * np.bincount(mapped_ids, minlength=atm_cell_count)
     ism_ice_area_flat = area_factor * np.bincount(mapped_ids, weights=m2d_flat, minlength=atm_cell_count)
+    
+    #
+    total_ism = np.sum( f2d_flat * m2d_flat) * area_factor 
+    total_atm = np.sum(atm_col_total_flat, where=(ism_ice_area_flat > 0.0))
+ 
+    conservation_stats['ism_total_input'] = total_ism
+    conservation_stats['atm_total_masked_to_ism'] = total_atm
 
     # Compute adjustments only for atm cells that have any valid vertical data and have non-zero ism area
     atm_valid_flat = np.any(valid_atm, axis=0).ravel(order='C')
-
+    
     delta_flat = np.zeros(atm_cell_count, dtype=float)
     nonz = atm_valid_flat & (ism_ice_area_flat > 0.0)
+ 
     if np.any(nonz):
+        atm_total_over_ism = np.sum(atm_col_total_flat[nonz])
+        
         delta_flat[nonz] = (atm_col_total_flat[nonz] *  \
                                 ism_ice_area_flat[nonz] / ism_area_flat[nonz]    \
                                     - ism_total_flat[nonz]) / ism_ice_area_flat[nonz]
 
+   
     # Apply adjustments to local grid: each local cell gets the delta of its mapped atm cell
     # For unmapped local cells (flat_map < 0) we do not apply any adjustment (delta_contrib = 0)
     delta_per_local = np.zeros_like(f2d_flat, dtype=float)
@@ -121,9 +138,19 @@ def glint_conservation_adjust(f2d_ism_nc, mask_ism,
 
     # Update flattened f2d and reshape back
     f2d_flat += delta_per_local
-    f2d_ism = f2d_flat.reshape(f2d_ism.shape, order='C')
+    
+    total_ism = np.sum( f2d_flat * m2d_flat) * area_factor 
+    conservation_stats['ism_total_after_atm_cell_conservation'] = total_ism
+    
+    f2d_flat *= total_atm/total_ism
+    total_ism = np.sum( f2d_flat * m2d_flat) * area_factor 
+    conservation_stats['ism_total_after_atm_region_conservation'] = total_ism
+    
 
-    return np.ma.masked_array(f2d_ism, ~mask_ism)
+    f2d_ism = f2d_flat.reshape(f2d_ism.shape, order='C')
+    
+   
+    return np.ma.masked_array(f2d_ism, ~mask_ism), conservation_stats
 
 
 
@@ -147,7 +174,7 @@ def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
     Returns
     -------
     list
-        Cropped fields, cropped atmospheric grid, and crop indices (ilo, ihi).
+        Cropped fields, cropped atmospheric grid, and crop indices (ilo, ihi.jlo, jhi).
     """
     
     # subset
@@ -156,15 +183,24 @@ def crop_global(arrs_global, grid_atm, grid_ism, up_transform):
     bb = Box( [np.min(lon_ism) - dlon, np.min(lat_ism) - dlat],
              [np.max(lon_ism) + dlon, np.max(lat_ism) + dlat])
 
-
+    #latitude crop
     ilo = max(0,np.argmin( np.abs(grid_atm.axes[1] - bb.lo[1])) - 1)
-    ihi = min(np.argmin( np.abs(grid_atm.axes[1] - bb.hi[1])) + 1,grid_atm.axes[1].shape[0])
-    grid_atm_sub = Uniform2DGrid( grid_atm.axes[0], grid_atm.axes[1][ilo:ihi])
+    ihi = min(np.argmin( np.abs(grid_atm.axes[1] - bb.hi[1])) + 1,grid_atm.axes[1].shape[0] )
+    
+    #longitude crop
+    #jlo = max(0,np.argmin( np.abs(grid_atm.axes[0] - bb.lo[0])) - 1)
+    #jhi = min(np.argmin( np.abs(grid_atm.axes[0] - bb.hi[0])) + 1,grid_atm.axes[0].shape[0] )
+    jlo = 0
+    jhi = grid_atm.axes[0].shape[0]
 
-    arrs = [arr[:,ilo:ihi,:] for arr in arrs_global]
+    grid_atm_sub = Uniform2DGrid( grid_atm.axes[0][jlo:jhi], grid_atm.axes[1][ilo:ihi])
+    #print (f'cropping {grid_atm.array_shape} -> {grid_atm_sub.array_shape}')
+
+    arrs = [arr[:,ilo:ihi,jlo:jhi] for arr in arrs_global]
     arrs.append(grid_atm_sub)
     arrs.append(ilo)
     arrs.append(ihi)
+
     return arrs
 
 
@@ -175,7 +211,7 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
                topo_atm, area_atm,  grid_atm,
                topo_ism, lithk_ism, frac_ism, mask_ism, grid_ism,
                up_transform,  down_transform, time_step, 
-               conservation=True, snow_to_ice=True): 
+               conservation=True, snow_to_ice=True, verbose=True): 
     """Downscale atmospheric fields to ice sheet grid.
     
     Interpolates atmospheric surface mass balance, temperature, snow, and heat flux
@@ -251,13 +287,18 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
         [np.ma.masked_array(interp_to_surface(f_xyz, topo_xyz, topo_ism), ~mask_ism)
          for f_xyz in [stemp_xyz, smb_xyz, snow_xyz, shflx_xyz]]
 
+
     if conservation and not isinstance(area_atm, type(None)):
-        smb_ism, snow_ism, shflx_ism = [glint_conservation_adjust(
+        (smb_ism, smb_stats), (snow_ism, _),  (shflx_ism, _) = [glint_conservation_adjust(
                             f_ism, mask_ism, 
                             f_atm, area_atm, valid_atm,
                             grid_pair) 
                 for f_ism, f_atm in zip([smb_ism, snow_ism, shflx_ism],
-                                 [smb_atm, snow_atm, shflx_atm])]
+                                 [smb_atm, snow_atm, shflx_atm],)]
+        if verbose:
+            print('SMB conservation stats')
+            for key, val in smb_stats.items():
+                print (f'{key} =  {smb_stats[key]}')
         
     if snow_to_ice:  
         #snow to ice conversion - store *change in* snow depth in snow_ism    
@@ -265,6 +306,7 @@ def atm_to_ism(smb_atm, stemp_atm, snow_atm, shflx_atm,
         smb_ism -= delta_snow_ism / time_step 
     else:
         delta_snow_ism = np.ma.masked_array( np.zeros_like(smb_ism.data), ~mask_ism)
+ 
 
     return smb_ism, stemp_ism, delta_snow_ism, shflx_ism
 
