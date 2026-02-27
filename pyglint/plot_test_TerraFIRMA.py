@@ -1,4 +1,5 @@
 import os
+import argparse
 import json
 import yaml
 import pickle
@@ -6,8 +7,6 @@ import xarray as xr
 import matplotlib.pyplot as plt
 
 OUTPUT_DIR = "test_outputs"
-ICESHEET = "GrIS"   # AIS or GrIS
-VARIABLE_TO_PLOT = "total_smb"
 
 def load_yaml(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -19,20 +18,32 @@ def load_json(path):
 
 def main():
 
+    ## Get command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--icesheet", required=True,
+                        help="Ice sheet to plot (e.g. AIS or GrIS)")
+    parser.add_argument("--variable", required=True,
+                        help="Variable name to plot, must exist in results.nc (e.g. total_smb)")
+    args = parser.parse_args()
+
+    icesheet = args.icesheet
+    variable_to_plot = args.variable
+
+
     ## Load the data from Glint/BISICLES for comparison
-    if ICESHEET == "AIS":
+    if icesheet == "AIS":
         with open('/gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/processed_data/AIS_data_overview.pkl', 'rb') as file:
             icesheet_d = pickle.load(file) 
 
         # only keep the first 50 years of data for cs568 to match the pyglint processed data (which only has 50 years of data)
-        icesheet_d["cs568"][0] = icesheet_d["cs568"][0].iloc[:9]
+        icesheet_d["cs568"][0] = icesheet_d["cs568"][0].iloc[:10]
 
-    elif ICESHEET == "GrIS":
+    elif icesheet == "GrIS":
         with open('/gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/processed_data/GrIS_data_overview.pkl', 'rb') as file:
             icesheet_d = pickle.load(file)
 
         # Drop the first year of data as its from an errant file
-        icesheet_d["cs568"][0] = icesheet_d["cs568"][0].iloc[1:10]
+        icesheet_d["cs568"][0] = icesheet_d["cs568"][0].iloc[1:11]
 
     # Get the data in the right units/variable for plotting
     bike_total_smb = (icesheet_d["cs568"][0]["grounded_SMB"] + icesheet_d["cs568"][0]["floating_SMB"])*918*1e-12
@@ -57,7 +68,7 @@ def main():
         meta = load_json(metadata_path)
 
         # Filter by icesheet
-        if cfg.get("icesheet") != ICESHEET:
+        if cfg.get("icesheet") != icesheet:
             continue
 
         # Don't plot masked data for now
@@ -67,11 +78,11 @@ def main():
         # Load timeseries
         ds = xr.load_dataset(results_path)
 
-        if VARIABLE_TO_PLOT not in ds:
+        if variable_to_plot not in ds:
             continue
 
         time = ds["time"].values
-        values = ds[VARIABLE_TO_PLOT].values
+        values = ds[variable_to_plot].values
 
         # Build label from metadata + config
         label = (
@@ -85,12 +96,12 @@ def main():
     plt.plot(icesheet_d["cs568"][0]["time"]-1850, bike_total_smb, label="Glint/BISICLES", color='black')
 
     plt.xlabel("Time")
-    plt.ylabel(f"{VARIABLE_TO_PLOT} (Gt/a)")
-    plt.title(f"{ICESHEET} {VARIABLE_TO_PLOT} Comparison")
+    plt.ylabel(f"{variable_to_plot} (Gt/a)")
+    plt.title(f"{icesheet} {variable_to_plot} Comparison")
     plt.legend()
     plt.tight_layout()
     plt.show()
-    plt.savefig(f"{OUTPUT_DIR}/pyglint_test_TerraFIRMA_{cfg.get('suite_id')}_{VARIABLE_TO_PLOT}_{ICESHEET}.png", dpi=600)
+    plt.savefig(f"{OUTPUT_DIR}/pyglint_test_TerraFIRMA_{cfg.get('suite_id')}_{variable_to_plot}_{icesheet}.png", dpi=600)
 
 if __name__ == "__main__":
     
