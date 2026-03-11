@@ -2,6 +2,52 @@
 
 ## Build notes
 
+### Ubuntu 24.04 (serial, debug)
+
+Same as Ubuntu 22.04 (below), with changes for Python 3.12 (assuming that BISICLES and Chombo have also been built with Python 3.12).
+
+Lines that need to change:
+
+```
+
+PYTHON=python3 FC=gfortran FCFLAGS="-fno-range-check -ffree-line-length-0 -DBISICLES_CDRIVER -DNO_RESCALE -g -I$BIKE/code/src " LDFLAGS="-L$BIKE/code/lib -lBisicles$BIKE_CONFIG -lChomboLibs$BIKE_CONFIG -lpython3.12 -L$HDF5 -lhdf5 -lz " ../glimmer-cism/configure --with-netcdf=$NETCDF --with-hdf5=$HDF5 --prefix=$PWD --disable-python
+
+make clean -f Makefile.ubuntu24.04
+make -f Makefile.ubuntu24.04
+
+``` 
+
+### Ubuntu 24.04 (parallel, opt, petsc, debug)
+
+Same as Ubuntu 22.04 (below), with changes for Python 3.12 (assuming that BISICLES and Chombo have also been built with Python 3.12).
+
+Lines that need to change:
+
+```
+
+PYTHON=python3 FC=gfortran FCFLAGS="-fno-range-check -ffree-line-length-0 -DBISICLES_CDRIVER -DNO_RESCALE -g -I$BIKE/code/src " LDFLAGS="-L$BIKE/code/lib -lBisicles$BIKE_CONFIG -lChomboLibs$BIKE_CONFIG -lpython3.12 -L$HDF5 -lhdf5 -lz " ../glimmer-cism/configure --with-netcdf=$NETCDF --with-hdf5=$HDF5 --prefix=$PWD --disable-python
+
+make clean -f Makefile.ubuntu24.04_opt_mpi_petsc
+make -f Makefile.ubuntu24.04_opt_mpi_petsc
+
+```
+
+#### Potential issues
+
+WSL does not have OpenBLAS installed by default, so you may need to run:
+
+```
+sudo apt install libopenblas-dev
+
+```
+I have also found that trying to compile the wrappers/ukesm-ice_NETCDF code was resulting in undefined reference errors for fftw3 functions (even though fftw3 was installed and BISICLES compiled succesfully against the fftw3 installation).
+
+In this case, solution is to recompile BISICLES without fftw3, and then compile the wrappers/ukesm-ice_NETCDF code against this version of BISICLES.
+
+```
+
+
+
 ### Ubuntu 22.04 (serial, debug)
 
 Assumes BISICLES at $BISICLES_HOME/bisicles-uob and Chombo at $BISICLES_HOME/Chombo.
@@ -30,7 +76,7 @@ make
 make install
 
 # build wrappers/ukesm-ice_NETCDF
-cd wrappers/ukesm-ice_NETCDF
+cd ../wrappers/ukesm-ice_NETCDF
 make clean -f Makefile.ubuntu22.04
 make -f Makefile.ubuntu22.04
 
@@ -64,7 +110,7 @@ make
 make install
 
 # build wrappers/ukesm-ice_NETCDF
-cd wrappers/ukesm-ice_NETCDF
+cd ../wrappers/ukesm-ice_NETCDF
 make clean -f Makefile.ubuntu22.04_opt_mpi_petsc
 make -f Makefile.ubuntu22.04_opt_mpi_petsc
 
@@ -95,7 +141,11 @@ make install
 
 ## Testing Notes
 
-### Using TerraFIRMA data
+### Testing unicicles with TerraFIRMA inputs
+
+Under `wrappers/ukesm-ice_NETCDF/terrafirma_test' there are the input files necessary to replicate the UniCiCles setup used in the TerraFIRMA project (UKESM1.2).
+
+### Testing pyglint with TerraFIRMA data
 
 To validate whether pyglint is producing the same integrated SMB over the ice sheets as the Glint code does, we can use the TerraFIRMA data. The SMB as calculated by Glint and passed to BISICLES (for simulations that had active ice sheet components) has been computed using BISICLES filetools.
 
