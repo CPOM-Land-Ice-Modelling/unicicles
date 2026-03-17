@@ -285,7 +285,7 @@ def _compute_derived_fields(
     geometry-based computation when they are absent:
 
     * **mask** – used directly if present; otherwise computed from
-      ``thickness`` and ``bedTopography`` via the flotation criterion
+      ``thickness`` and ``Z_base`` via the flotation criterion
       (:func:`compute_flotation_mask`).
     * **iceFrac** – used directly if present; otherwise approximated as a
       binary field (1 where ``thickness > h_min``, else 0).
@@ -334,16 +334,16 @@ def _compute_derived_fields(
     if "mask" in variables:
         mask = variables["mask"]
         mask_source = "mask from plot file"
-    elif "thickness" in variables and "bedTopography" in variables:
+    elif "thickness" in variables and "Z_base" in variables:
         mask = compute_flotation_mask(
             variables["thickness"],
-            variables["bedTopography"],
+            variables["Z_base"],
             ice_density=ice_density,
             water_density=water_density,
             h_min=h_min,
         )
         mask_source = (
-            f"computed from flotation criterion using thickness and bedTopography "
+            f"computed from flotation criterion using thickness and Z_base "
             f"(rho_ice={ice_density} kg/m3, rho_water={water_density} kg/m3, "
             f"h_min={h_min} m)"
         )

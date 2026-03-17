@@ -74,7 +74,7 @@ FIELD_MAPPING = {
         "modeling_realm": "landIce",
         "cmip7_compliant": True,
     },
-    "bedTopography": {
+    "Z_base": {
         "cmip7_name": "topg",
         "standard_name": "bedrock_altitude",
         "long_name": "Bedrock Altitude",
@@ -191,7 +191,8 @@ FIELD_MAPPING = {
         ),
     },
     # land_ice_base_elevation is not in the CMIP7 landIce table.
-    "Z_base": {
+    # Z_bottom = z_surface - thickness (bottom surface of the ice column).
+    "Z_bottom": {
         "cmip7_name": "base",
         "standard_name": "land_ice_base_elevation",
         "long_name": "Land Ice Base Elevation",
