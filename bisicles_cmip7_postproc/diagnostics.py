@@ -22,6 +22,7 @@ Quantities (units):
   discharge (m3/a), flxDivFile (m3/a), flxDivReconstr (m3/a)
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -112,7 +113,7 @@ def run_diagnostics(
     _tmp_created = out_file is None
     if _tmp_created:
         fd, out_file = tempfile.mkstemp(suffix=".csv", prefix="bisicles_diag_")
-        import os; os.close(fd)
+        os.close(fd)
 
     args = [
         exe,

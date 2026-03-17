@@ -41,6 +41,7 @@ The function :func:`compute_flotation_mask` is also available as a public API
 for use in other contexts.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
