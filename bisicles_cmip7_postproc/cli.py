@@ -92,12 +92,9 @@ def _add_metadata_args(parser):
 def _add_exe_args(parser, tool_name):
     """Add executable path argument."""
     parser.add_argument(
-        "--exe-path", default=None, dest="exe_path",
+        "--exe-path", required=True, dest="exe_path",
         metavar="PATH",
-        help=(
-            f"Path to the BISICLES {tool_name} executable. "
-            "Auto-detected from the bisicles-uob filetools directory if not given."
-        ),
+        help=f"Full path to the BISICLES {tool_name} executable file.",
     )
 
 

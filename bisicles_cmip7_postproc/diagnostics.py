@@ -22,7 +22,6 @@ Quantities (units):
   discharge (m3/a), flxDivFile (m3/a), flxDivReconstr (m3/a)
 """
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -40,76 +39,12 @@ from .filename_parser import parse_bisicles_filename
 
 
 # ---------------------------------------------------------------------------
-# Locating the diagnostics executable
-# ---------------------------------------------------------------------------
-
-_DEFAULT_EXE_GLOB = "diagnostics2d*.ex"
-
-_FILETOOLS_REL = Path(__file__).parent.parent.parent / "bisicles-uob" / "code" / "filetools"
-
-
-def find_diagnostics_exe(exe_path=None):
-    """
-    Locate the BISICLES diagnostics executable.
-
-    Parameters
-    ----------
-    exe_path : str or Path, optional
-        Explicit path to the executable.  If supplied and the file exists,
-        it is returned immediately.
-
-    Returns
-    -------
-    str
-        Absolute path to the executable.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no executable can be found.
-    """
-    if exe_path is not None:
-        p = Path(exe_path)
-        if p.is_dir():
-            raise ValueError(
-                f"exe_path points to a directory, not an executable: {exe_path}\n"
-                "Provide the full path to the executable file, e.g.:\n"
-                "  exe_path: /path/to/filetools/diagnostics2d.Linux.64.g++.gfortran.DEBUG.OPT.ex\n"
-                "or leave exe_path unset for auto-detection."
-            )
-        if p.is_file():
-            return str(p)
-        raise FileNotFoundError(f"Diagnostics executable not found at {exe_path}")
-
-    # Search in the standard bisicles-uob filetools location using os.listdir
-    # (only requires read permission on the directory, not execute permission).
-    try:
-        entries = os.listdir(_FILETOOLS_REL)
-    except (PermissionError, FileNotFoundError, OSError):
-        entries = []
-
-    import fnmatch
-    for name in sorted(entries):
-        if fnmatch.fnmatch(name, _DEFAULT_EXE_GLOB):
-            return str(_FILETOOLS_REL / name)
-
-    raise FileNotFoundError(
-        "Could not locate the BISICLES diagnostics executable. "
-        f"Searched for '{_DEFAULT_EXE_GLOB}' in:\n"
-        f"  {_FILETOOLS_REL}\n"
-        "Pass the exe_path argument explicitly, e.g.:\n"
-        "  run_diagnostics(plot_file, exe_path='/path/to/diagnostics2d.*.ex')\n"
-        "or set 'exe_path' in your config file."
-    )
-
-
-# ---------------------------------------------------------------------------
 # Running the diagnostics tool
 # ---------------------------------------------------------------------------
 
 def run_diagnostics(
     plot_file,
-    exe_path=None,
+    exe_path,
     out_file=None,
     append=False,
     ice_density=918.0,
@@ -127,8 +62,8 @@ def run_diagnostics(
     ----------
     plot_file : str or Path
         Path to the BISICLES plot HDF5 file.
-    exe_path : str or Path, optional
-        Path to the diagnostics executable.  Auto-detected if not given.
+    exe_path : str or Path
+        Full path to the diagnostics executable.
     out_file : str or Path, optional
         Path for the CSV output.  A temporary file is created if not given.
     append : bool
@@ -158,12 +93,26 @@ def run_diagnostics(
     RuntimeError
         If the diagnostics executable exits with a non-zero return code.
     """
-    exe = find_diagnostics_exe(exe_path)
+    if exe_path is None:
+        raise ValueError(
+            "exe_path is required. Provide the full path to the diagnostics executable, e.g.:\n"
+            "  --exe-path /path/to/filetools/diagnostics2d.Linux.64.g++.gfortran.OPT.ex"
+        )
+    p = Path(exe_path)
+    if p.is_dir():
+        raise ValueError(
+            f"exe_path points to a directory, not an executable: {exe_path}\n"
+            "Provide the full path to the executable file, e.g.:\n"
+            "  /path/to/filetools/diagnostics2d.Linux.64.g++.gfortran.OPT.ex"
+        )
+    if not p.is_file():
+        raise FileNotFoundError(f"Diagnostics executable not found: {exe_path}")
+    exe = str(p)
 
     _tmp_created = out_file is None
     if _tmp_created:
         fd, out_file = tempfile.mkstemp(suffix=".csv", prefix="bisicles_diag_")
-        os.close(fd)
+        import os; os.close(fd)
 
     args = [
         exe,
@@ -487,7 +436,7 @@ def _check_not_cf_mean(plot_file):
 def process_single_file(
     plot_file,
     output_nc,
-    exe_path=None,
+    exe_path,
     ice_density=918.0,
     water_density=1028.0,
     gravity=9.81,
@@ -506,7 +455,8 @@ def process_single_file(
     ----------
     plot_file : str or Path
     output_nc : str or Path
-    exe_path : str or Path, optional
+    exe_path : str or Path
+        Full path to the diagnostics executable.
     ice_density, water_density, gravity, h_min : float
     mask_file : str or Path, optional
     mask_no_start, mask_no_end : int
@@ -557,7 +507,7 @@ def process_single_file(
 def process_directory(
     directory,
     output_nc,
-    exe_path=None,
+    exe_path,
     plot_pattern="plot.*.2d.hdf5",
     ice_density=918.0,
     water_density=1028.0,
@@ -581,8 +531,8 @@ def process_directory(
         Directory containing BISICLES plot HDF5 files.
     output_nc : str or Path
         Path for the output NetCDF file.
-    exe_path : str or Path, optional
-        Path to the diagnostics executable.
+    exe_path : str or Path
+        Full path to the diagnostics executable.
     plot_pattern : str
         Glob pattern for plot files (default ``plot.*.2d.hdf5``).
     ice_density, water_density, gravity, h_min : float

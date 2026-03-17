@@ -34,8 +34,8 @@ verbose: true
 # Executables
 # ---------------------------------------------------------------------------
 
-# Path to the BISICLES diagnostics executable.
-# Auto-detected from bisicles-uob/code/filetools/ if not set.
+# Full path to the BISICLES diagnostics executable. REQUIRED.
+# Example: /path/to/bisicles-uob/code/filetools/diagnostics2d.Linux.64.g++.gfortran.OPT.ex
 exe_path: null
 
 

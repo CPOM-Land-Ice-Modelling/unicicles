@@ -41,7 +41,6 @@ The function :func:`compute_flotation_mask` is also available as a public API
 for use in other contexts.
 """
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -70,75 +69,14 @@ from .filename_parser import parse_bisicles_filename
 
 
 # ---------------------------------------------------------------------------
-# Locating the flatten executable
-# ---------------------------------------------------------------------------
-
-_DEFAULT_EXE_GLOB = "flatten2d*.ex"
-
-_FILETOOLS_REL = Path(__file__).parent.parent.parent / "bisicles-uob" / "code" / "filetools"
-
-
-def find_flatten_exe(exe_path=None):
-    """
-    Locate the BISICLES flatten executable.
-
-    Parameters
-    ----------
-    exe_path : str or Path, optional
-        Explicit path to the executable.
-
-    Returns
-    -------
-    str
-        Absolute path to the executable.
-
-    Raises
-    ------
-    FileNotFoundError
-    """
-    if exe_path is not None:
-        p = Path(exe_path)
-        if p.is_dir():
-            raise ValueError(
-                f"exe_path points to a directory, not an executable: {exe_path}\n"
-                "Provide the full path to the executable file, e.g.:\n"
-                "  exe_path: /path/to/filetools/flatten2d.Linux.64.g++.gfortran.DEBUG.OPT.ex\n"
-                "or leave exe_path unset for auto-detection."
-            )
-        if p.is_file():
-            return str(p)
-        raise FileNotFoundError(f"Flatten executable not found at {exe_path}")
-
-    # Use os.listdir (requires only read permission on the directory).
-    try:
-        entries = os.listdir(_FILETOOLS_REL)
-    except (PermissionError, FileNotFoundError, OSError):
-        entries = []
-
-    import fnmatch
-    for name in sorted(entries):
-        if fnmatch.fnmatch(name, _DEFAULT_EXE_GLOB):
-            return str(_FILETOOLS_REL / name)
-
-    raise FileNotFoundError(
-        "Could not locate the BISICLES flatten executable. "
-        f"Searched for '{_DEFAULT_EXE_GLOB}' in:\n"
-        f"  {_FILETOOLS_REL}\n"
-        "Pass exe_path explicitly, e.g.:\n"
-        "  process_plotfile(..., exe_path='/path/to/flatten2d.*.ex')\n"
-        "or set 'exe_path' in your config file."
-    )
-
-
-# ---------------------------------------------------------------------------
 # Running the flatten tool
 # ---------------------------------------------------------------------------
 
 def run_flatten(
     input_hdf5,
     output_nc,
+    exe_path,
     level=0,
-    exe_path=None,
     x0=None,
     y0=None,
 ):
@@ -151,11 +89,11 @@ def run_flatten(
         Path to the BISICLES plot HDF5 file.
     output_nc : str or Path
         Path for the output NetCDF file (must end in .nc).
+    exe_path : str or Path
+        Full path to the flatten executable.
     level : int
         AMR level to flatten onto.  0 = coarsest grid; higher values give finer
         resolution.
-    exe_path : str or Path, optional
-        Path to the flatten executable (auto-detected if not given).
     x0 : float, optional
         X-coordinate origin override (metres).
     y0 : float, optional
@@ -170,7 +108,21 @@ def run_flatten(
         raise ValueError(
             f"level must be >= 0 (0 = coarsest grid). Got: {level}"
         )
-    exe = find_flatten_exe(exe_path)
+    if exe_path is None:
+        raise ValueError(
+            "exe_path is required. Provide the full path to the flatten executable, e.g.:\n"
+            "  --exe-path /path/to/filetools/flatten2d.Linux.64.g++.gfortran.OPT.ex"
+        )
+    p = Path(exe_path)
+    if p.is_dir():
+        raise ValueError(
+            f"exe_path points to a directory, not an executable: {exe_path}\n"
+            "Provide the full path to the executable file, e.g.:\n"
+            "  /path/to/filetools/flatten2d.Linux.64.g++.gfortran.OPT.ex"
+        )
+    if not p.is_file():
+        raise FileNotFoundError(f"Flatten executable not found: {exe_path}")
+    exe = str(p)
     args = [exe, str(input_hdf5), str(output_nc), str(level)]
     if x0 is not None and y0 is not None:
         args += [str(x0), str(y0)]
@@ -671,7 +623,7 @@ def write_cmip7_netcdf(
 def process_plotfile(
     plot_file,
     output_nc,
-    exe_path=None,
+    exe_path,
     level=0,
     epsg_code=None,
     x0=None,
@@ -697,8 +649,8 @@ def process_plotfile(
         Input BISICLES plot HDF5 file.
     output_nc : str or Path
         Output CF/CMIP7 NetCDF file.
-    exe_path : str or Path, optional
-        Path to the flatten executable (auto-detected if not given).
+    exe_path : str or Path
+        Full path to the flatten executable.
     level : int
         AMR level to flatten onto (0 = coarsest grid).
     epsg_code : int, optional
@@ -818,9 +770,9 @@ def process_plotfile(
 
 def process_directory(
     directory,
+    exe_path,
     output_dir=None,
     plot_pattern="plot.*.2d.hdf5",
-    exe_path=None,
     level=0,
     epsg_code=None,
     x0=None,
@@ -847,8 +799,8 @@ def process_directory(
         as the input files.
     plot_pattern : str
         Glob pattern for plot files.
-    exe_path : str or Path, optional
-        Path to the flatten executable.
+    exe_path : str or Path
+        Full path to the flatten executable.
     level : int
         AMR level to flatten onto.
     epsg_code : int, optional

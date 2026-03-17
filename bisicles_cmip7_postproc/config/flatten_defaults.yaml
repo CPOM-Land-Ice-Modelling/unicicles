@@ -47,8 +47,8 @@ verbose: true
 # Executables
 # ---------------------------------------------------------------------------
 
-# Path to the BISICLES flatten executable.
-# Auto-detected from bisicles-uob/code/filetools/ if not set.
+# Full path to the BISICLES flatten executable. REQUIRED.
+# Example: /path/to/bisicles-uob/code/filetools/flatten2d.Linux.64.g++.gfortran.OPT.ex
 exe_path: null
 
 
