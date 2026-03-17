@@ -1,0 +1,127 @@
+# bisicles_cmip7_postproc — flatten workflow config
+# ===================================================
+# Flattens BISICLES AMR HDF5 plot files onto a uniform grid and writes
+# CMIP7/CF-compliant 2D spatial NetCDF files.
+#
+# Usage:
+#   bike-cmip7-postproc-run flatten_defaults.yaml
+#   bike-cmip7-postproc-flatten --config flatten_defaults.yaml
+#
+# Copy this file, set 'input' and the CF metadata fields, then run.
+# Any option left as null will use the built-in default.
+
+tool: flatten
+
+
+# ---------------------------------------------------------------------------
+# Input / output
+# ---------------------------------------------------------------------------
+
+# Path to a BISICLES plot HDF5 file or a directory of plot files. [required]
+input: null
+
+# Output NetCDF file path (single-file mode only).
+# Auto-generated from the input filename if not set.
+output: null
+
+# Output directory for NetCDF files (directory mode).
+# Defaults to the same directory as the input files if not set.
+output_dir: null
+
+# Glob pattern used to find plot files when 'input' is a directory.
+plot_pattern: "plot.*.2d.hdf5"
+
+# Only write CMIP7-standard variables.
+# When false, unmapped BISICLES fields are also written with their original names.
+cmip7_only: false
+
+# Keep the intermediate raw NetCDF written by the flatten executable
+# (single-file mode only; saved next to the output file as *_flatten_raw.nc).
+keep_intermediate: false
+
+# Print progress messages to stdout.
+verbose: true
+
+
+# ---------------------------------------------------------------------------
+# Executables
+# ---------------------------------------------------------------------------
+
+# Path to the BISICLES flatten executable.
+# Auto-detected from bisicles-uob/code/filetools/ if not set.
+exe_path: null
+
+
+# ---------------------------------------------------------------------------
+# Grid / projection
+# ---------------------------------------------------------------------------
+
+# EPSG code for the coordinate reference system.
+#   3413  — NSIDC Sea Ice Polar Stereographic North (GrIS)
+#   3031  — Antarctic Polar Stereographic (AIS)
+# Overrides the value read from the HDF5 file metadata if set.
+epsg: null
+
+# AMR level to flatten onto (must be >= 0).
+#   0   = coarsest grid
+#   1,2 = successively finer levels
+level: 0
+
+# X/Y coordinates of the lower-left corner of the domain (metres).
+# When null and epsg matches a known UKESM grid, the UKESM standard origin
+# is used automatically:
+#   GrIS (3413): x0 = -654650.0,  y0 = -3385950.0
+#   AIS  (3031): x0 = -3072000.0, y0 = -3072000.0
+x0: null
+y0: null
+
+
+# ---------------------------------------------------------------------------
+# Time axis
+# ---------------------------------------------------------------------------
+
+# Reference year for the CF time axis (days since <reference_year>-01-01).
+reference_year: 1850
+
+# CF calendar used to convert simulation years to days.
+#   gregorian  — 365.25 days/year (BISICLES internal time)
+#   360_day    — 360 days/year (UKESM coupled runs)
+calendar: gregorian
+
+
+# ---------------------------------------------------------------------------
+# Flotation mask fallback
+# ---------------------------------------------------------------------------
+# Used when the plot file does not contain an explicit 'mask' or 'iceFrac'
+# variable.  The grounded/floating partition is then derived from the
+# flotation criterion using ice thickness and bed topography.
+
+# Ice density in kg m⁻³.
+ice_density: 918.0
+
+# Ocean water density in kg m⁻³.
+water_density: 1028.0
+
+# Minimum ice thickness in metres below which a cell is treated as ice-free.
+h_min: 1.0
+
+
+# ---------------------------------------------------------------------------
+# CF / CMIP7 global attributes
+# ---------------------------------------------------------------------------
+
+institution: ""
+source: "BISICLES adaptive mesh refinement ice sheet model"
+experiment: ""
+variant_label: ""
+
+# Ice sheet identifier written to global attributes.
+#   GrIS  — Greenland Ice Sheet
+#   AIS   — Antarctic Ice Sheet
+ice_sheet: ""
+
+# Any additional global attributes as key-value pairs, e.g.:
+#   extra_attrs:
+#     contact: your.name@institution.ac.uk
+#     references: https://doi.org/10.5194/gmd-xx-xxxx-xxxx
+extra_attrs: null

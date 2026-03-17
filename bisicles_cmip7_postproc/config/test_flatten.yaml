@@ -1,0 +1,15 @@
+tool: flatten
+
+input: /home/tm17544/Data/cmip7_postproc_testing/
+
+output_dir: /home/tm17544/Data/cmip7_postproc_testing/
+
+# Glob pattern used to find plot files when 'input' is a directory.
+plot_pattern: "*plot-AIS.hdf5"
+
+epsg: 3031
+
+level: 0
+
+calendar: 360_day
+

@@ -1,0 +1,106 @@
+# bisicles_cmip7_postproc — diagnostics workflow config
+# ======================================================
+# Runs the BISICLES diagnostics tool on a plot file or directory of plot files
+# and writes a CF-compliant scalar timeseries NetCDF.
+#
+# Usage:
+#   bike-cmip7-postproc-run diagnostics_defaults.yaml
+#   bike-cmip7-postproc-diagnostics --config diagnostics_defaults.yaml
+#
+# Copy this file, set 'input', 'output', and the CF metadata fields, then run.
+# Any option left as null will use the built-in default.
+
+tool: diagnostics
+
+
+# ---------------------------------------------------------------------------
+# Input / output
+# ---------------------------------------------------------------------------
+
+# Path to a BISICLES plot HDF5 file or a directory of plot files. [required]
+input: null
+
+# Output CF NetCDF timeseries file. [required]
+output: null
+
+# Glob pattern used to find plot files when 'input' is a directory.
+plot_pattern: "plot.*.2d.hdf5"
+
+# Print progress messages to stdout.
+verbose: true
+
+
+# ---------------------------------------------------------------------------
+# Executables
+# ---------------------------------------------------------------------------
+
+# Path to the BISICLES diagnostics executable.
+# Auto-detected from bisicles-uob/code/filetools/ if not set.
+exe_path: null
+
+
+# ---------------------------------------------------------------------------
+# Physical constants
+# ---------------------------------------------------------------------------
+
+# Ice density in kg m⁻³.
+ice_density: 918.0
+
+# Ocean water density in kg m⁻³.
+water_density: 1028.0
+
+# Gravitational acceleration in m s⁻².
+gravity: 9.81
+
+# Minimum ice thickness in metres below which a cell is excluded from
+# volume/mass diagnostics.
+h_min: 1.0
+
+
+# ---------------------------------------------------------------------------
+# Regional mask (optional)
+# ---------------------------------------------------------------------------
+# Provide an HDF5 mask file to split diagnostics into sub-regions (e.g.
+# individual drainage basins).  Leave mask_file as null for whole ice-sheet
+# diagnostics only.
+
+# Path to an HDF5 mask file.
+mask_file: null
+
+# First and last mask region index to process (inclusive).
+mask_no_start: 0
+mask_no_end: 0
+
+
+# ---------------------------------------------------------------------------
+# Time axis
+# ---------------------------------------------------------------------------
+
+# Reference year for the CF time axis (days since <reference_year>-01-01).
+reference_year: 1850
+
+# CF calendar used to convert simulation years to days.
+#   gregorian  — 365.25 days/year (BISICLES internal time)
+#   360_day    — 360 days/year (UKESM coupled runs)
+calendar: gregorian
+
+
+# ---------------------------------------------------------------------------
+# CF / CMIP7 global attributes
+# ---------------------------------------------------------------------------
+
+institution: ""
+source: "BISICLES adaptive mesh refinement ice sheet model"
+experiment: ""
+variant_label: ""
+
+# Ice sheet identifier written to global attributes.
+#   GrIS  — Greenland Ice Sheet
+#   AIS   — Antarctic Ice Sheet
+ice_sheet: ""
+
+# Any additional global attributes as key-value pairs, e.g.:
+#   extra_attrs:
+#     contact: your.name@institution.ac.uk
+#     references: https://doi.org/10.5194/gmd-xx-xxxx-xxxx
+extra_attrs: null
