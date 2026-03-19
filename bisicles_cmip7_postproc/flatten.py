@@ -39,6 +39,14 @@ absent, the module falls back to computing them from ice geometry:
 
 The function :func:`compute_flotation_mask` is also available as a public API
 for use in other contexts.
+
+Output file organisation
+------------------------
+Both :func:`process_plotfile` (single file) and :func:`process_directory`
+(directory of files) write **one output NetCDF per CMIP7 variable**, named
+``{cmip7_name}_cmip7.nc``, inside the specified ``output_dir``.  When
+processing a directory the time axis of each file spans all input timesteps,
+giving a multi-year timeseries per variable.
 """
 
 import os
@@ -65,6 +73,8 @@ from .cf_utils import (
     add_time_bounds,
     add_xy_variables,
     add_crs_variable,
+    compute_latlon_arrays,
+    add_latlon_variables,
 )
 from .filename_parser import parse_bisicles_filename
 
@@ -291,7 +301,8 @@ def _compute_derived_fields(
       binary field (1 where ``thickness > h_min``, else 0).
 
     The fallback paths are recorded on the returned ``_derived_sources`` dict
-    which ``write_cmip7_netcdf`` uses to annotate the output variables.
+    which ``write_cmip7_per_variable_netcdfs`` uses to annotate the output
+    variables.
 
     Parameters
     ----------
@@ -365,9 +376,73 @@ def _compute_derived_fields(
     return sources
 
 
-def write_cmip7_netcdf(
-    flatten_data,
-    output_nc,
+# ---------------------------------------------------------------------------
+# Module-level variable-writing helper
+# ---------------------------------------------------------------------------
+
+def _write_2d_var(ds, out_name, arr_3d, mapping, time_cell_method, grid_mapping,
+                  bisicles_name=None, coordinates=""):
+    """
+    Write one ``(time, y, x)`` data variable with full CF/CMIP7 metadata.
+
+    Parameters
+    ----------
+    ds : netCDF4.Dataset
+        Open, writable Dataset; must already have ``time``, ``y``, ``x``
+        dimensions defined.
+    out_name : str
+        Variable name in the output file (CMIP7 name).
+    arr_3d : ndarray, shape (T, ny, nx)
+        Data array in BISICLES units; the mapping's ``conversion_factor`` is
+        applied inside this function.
+    mapping : dict
+        Entry from :data:`FIELD_MAPPING` or :data:`CF_FIELD_MAPPING`.
+    time_cell_method : str
+        ``"time: mean"`` or ``"time: point"``.  Controls whether the stored
+        ``cell_methods`` attribute reflects averaging or instantaneous output.
+    grid_mapping : str or None
+        Name of the CRS variable, or ``None`` if no projection is defined.
+    bisicles_name : str, optional
+        BISICLES internal field name; written as ``bisicles_name`` attribute
+        when supplied.
+    coordinates : str
+        Space-separated list of *auxiliary* coordinate variable names to
+        record in the CF ``coordinates`` attribute.  Per CF-1.12, only
+        auxiliary coordinates (e.g. ``"lat lon"``) should be listed here —
+        dimension coordinates (``x``, ``y``, ``time``) are self-identifying
+        and must NOT appear.  Pass an empty string to omit the attribute.
+    """
+    arr = arr_3d * mapping["conversion_factor"]
+    arr = np.where(np.isnan(arr), FILL_VALUE, arr)
+    cell_methods = mapping["cell_methods"]
+    if time_cell_method == "time: point":
+        cell_methods = cell_methods.replace("time: mean", "time: point")
+    var = ds.createVariable(out_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE)
+    var[:] = arr
+    var.standard_name = mapping["standard_name"]
+    var.long_name = mapping["long_name"]
+    var.units = mapping["cmip7_units"]
+    var.missing_value = np.float32(FILL_VALUE)
+    var.cell_methods = cell_methods
+    var.modeling_realm = mapping["modeling_realm"]
+    if coordinates:
+        var.coordinates = coordinates
+    if grid_mapping:
+        var.grid_mapping = grid_mapping
+    if "comment" in mapping:
+        var.comment = mapping["comment"]
+    if bisicles_name is not None:
+        var.bisicles_name = bisicles_name
+    var.bisicles_units = mapping["bisicles_units"]
+
+
+# ---------------------------------------------------------------------------
+# Writing per-variable CMIP7 NetCDF files
+# ---------------------------------------------------------------------------
+
+def write_cmip7_per_variable_netcdfs(
+    all_data,
+    output_dir,
     epsg_code=None,
     x0=None,
     y0=None,
@@ -383,89 +458,200 @@ def write_cmip7_netcdf(
     variant_label="",
     ice_sheet="",
     extra_attrs=None,
-    file_info=None,
 ):
     """
-    Write a CMIP7/CF-compliant 2D spatial NetCDF from flatten tool output.
+    Write one CMIP7/CF-compliant NetCDF per variable from a collection of
+    flatten outputs.
+
+    Each output file is named ``{cmip7_name}_cmip7.nc`` inside *output_dir*
+    and contains a single data variable with a ``time`` dimension spanning all
+    supplied timesteps.
 
     Parameters
     ----------
-    flatten_data : dict
-        Dictionary as returned by :func:`_read_flatten_nc`.
-    output_nc : str or Path
-        Path for the output NetCDF file.
+    all_data : list of (dict, BISICLESFileInfo or None)
+        Each element is ``(flatten_data, file_info)`` where *flatten_data* is
+        the dict returned by :func:`_read_flatten_nc` and *file_info* is the
+        result of :func:`~.filename_parser.parse_bisicles_filename` (or
+        ``None`` when filename parsing is not applicable).  One entry per
+        input timestep.
+    output_dir : str or Path
+        Directory for output files.  Created if it does not exist.
     epsg_code : int, optional
-        EPSG code for the projection.  Overrides the value read from the flatten
-        NetCDF if supplied.  If None, the value from flatten_data is used.
+        EPSG code for the projection.  Overrides the value read from the
+        flatten NetCDF files when supplied.
+    x0 : float, optional
+        X-coordinate of the lower-left corner of the domain (metres).
+    y0 : float, optional
+        Y-coordinate of the lower-left corner of the domain (metres).
     reference_year : int
-        Reference year for the time axis (default 1850).
+        Reference year for the CF time axis (default 1850).
     calendar : str
-        CF calendar name for the time axis: ``"gregorian"`` (default, 365.25
-        days/year as used by BISICLES internally) or ``"360_day"`` (360
-        days/year as used by UKESM).
+        CF calendar name: ``"gregorian"`` (default) or ``"360_day"``.
     cmip7_only : bool
-        If True, only write variables present in :data:`FIELD_MAPPING` and the
-        derived fields.  If False (default), also write any unmapped BISICLES
-        variables with their original names so no data is lost.
+        If True, only write CMIP7-standard variables.  If False (default),
+        also write unmapped BISICLES variables with their original names.
     ice_density : float
-        Ice density in kg m-3 used when deriving the grounded/floating mask
-        from the flotation criterion (default 918.0).  Ignored if the plot
-        file contains an explicit ``mask`` variable.
+        Ice density in kg m-3 for the flotation-based mask fallback.
     water_density : float
-        Ocean water density in kg m-3, used with *ice_density* for the
-        flotation criterion (default 1028.0).
+        Ocean water density in kg m-3 for the flotation-based mask fallback.
     h_min : float
-        Minimum ice thickness in metres below which a cell is treated as
-        ice-free when computing the fallback mask or iceFrac (default 1.0 m).
+        Minimum ice thickness in metres for the mask/iceFrac fallback.
     institution : str
-        Written to the global 'institution' attribute.
+        Written to the global ``institution`` attribute.
     source : str
-        Written to the global 'source' attribute.
+        Written to the global ``source`` attribute.
     experiment : str
         Experiment identifier.
     variant_label : str
         CMIP variant label.
     ice_sheet : str
-        Ice sheet identifier (e.g. 'GrIS', 'AIS').
+        Ice sheet identifier (e.g. ``'GrIS'``, ``'AIS'``).
     extra_attrs : dict, optional
         Additional global attributes.
-    file_info : BISICLESFileInfo, optional
-        Parsed filename metadata from :func:`~.filename_parser.parse_bisicles_filename`.
-        When supplied the simulation time, time bounds, and ``cell_methods``
-        time component are derived from the filename rather than the HDF5
-        internal time (which is always 0 in UKESM-coupled runs).
+
+    Returns
+    -------
+    list of Path
+        Paths of output NetCDF files written (one per variable).
     """
     from netCDF4 import Dataset
 
-    x = flatten_data.get("x")
-    y = flatten_data.get("y")
-    variables = dict(flatten_data.get("variables", {}))
-    epsg = epsg_code if epsg_code is not None else flatten_data.get("epsg")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine time from filename metadata (preferred) or HDF5 internal value
-    if file_info is not None:
-        time_years = file_info.time_years
-        is_time_mean = file_info.is_time_mean
-        time_start_years = file_info.start_time_years
-        time_end_years = file_info.end_time_years
-        time_cell_method = file_info.cell_methods_time
-    else:
-        time_years = flatten_data.get("time")
-        is_time_mean = False
-        time_start_years = None
-        time_end_years = None
-        time_cell_method = "time: point"
+    if not all_data:
+        raise ValueError("all_data is empty; nothing to write.")
+
+    # -----------------------------------------------------------------------
+    # Phase 1: accumulate time metadata and per-variable 2-D arrays
+    # -----------------------------------------------------------------------
+    times_list = []
+    is_time_mean_list = []
+    time_start_list = []
+    time_end_list = []
+    time_cell_method_list = []
+
+    # Accumulators: {name: [arr_at_t0, arr_at_t1, ...]}
+    bisicles_arrays = {}
+    cf_arrays = {}
+    derived_arrays = {}
+    derived_src = {}     # {derived_name: provenance_str} – from last timestep
+    unmapped_arrays = {}
+
+    x = None
+    y = None
+    epsg = epsg_code  # overridden from first file when not supplied
+
+    for flatten_data, file_info in all_data:
+        # Coordinates and projection from first file (assumed constant)
+        if x is None:
+            x = flatten_data.get("x")
+            y = flatten_data.get("y")
+            if epsg is None:
+                epsg = flatten_data.get("epsg")
+
+        # Time metadata
+        if file_info is not None:
+            t = file_info.time_years
+            is_mean = file_info.is_time_mean
+            t_start = file_info.start_time_years
+            t_end = file_info.end_time_years
+            tcm = file_info.cell_methods_time
+        else:
+            t = flatten_data.get("time")
+            is_mean = False
+            t_start = None
+            t_end = None
+            tcm = "time: point"
+
+        times_list.append(t)
+        is_time_mean_list.append(is_mean)
+        time_start_list.append(t_start)
+        time_end_list.append(t_end)
+        time_cell_method_list.append(tcm)
+
+        # Work on a mutable copy so _compute_derived_fields can add sftgrf/sftflf
+        variables = dict(flatten_data.get("variables", {}))
+        sources = _compute_derived_fields(
+            variables,
+            ice_density=ice_density,
+            water_density=water_density,
+            h_min=h_min,
+        )
+        derived_src.update(sources)
+
+        # BISICLES internal name -> CMIP7
+        for bname in FIELD_MAPPING:
+            if bname in variables:
+                bisicles_arrays.setdefault(bname, []).append(variables[bname])
+
+        # CF-output name -> CMIP7 (plot.CF-*.hdf5 files)
+        written_cf = set()
+        for cf_name in CF_FIELD_MAPPING:
+            if cf_name in variables:
+                cf_arrays.setdefault(cf_name, []).append(variables[cf_name])
+                written_cf.add(cf_name)
+
+        # Derived fields (sftgrf, sftflf) – skip if CF file already provides them
+        for dname in DERIVED_FIELDS:
+            if dname not in written_cf and dname in variables:
+                derived_arrays.setdefault(dname, []).append(variables[dname])
+
+        # Unmapped BISICLES variables
+        if not cmip7_only:
+            known = set(FIELD_MAPPING) | set(CF_FIELD_MAPPING) | set(DERIVED_FIELDS)
+            for bname, arr in variables.items():
+                if bname not in known and arr.ndim >= 2:
+                    unmapped_arrays.setdefault(bname, []).append(arr)
 
     if x is None or y is None:
         raise ValueError("Flatten data is missing x or y coordinate arrays.")
 
-    # Compute derived fields before we start writing; capture provenance
-    derived_sources = _compute_derived_fields(
-        variables,
-        ice_density=ice_density,
-        water_density=water_density,
-        h_min=h_min,
-    )
+    # -----------------------------------------------------------------------
+    # Phase 2: sort all per-timestep data by ascending time
+    # -----------------------------------------------------------------------
+    sort_idx = sorted(range(len(times_list)), key=lambda i: times_list[i])
+    times_sorted = [times_list[i] for i in sort_idx]
+    is_mean_sorted = [is_time_mean_list[i] for i in sort_idx]
+    t_start_sorted = [time_start_list[i] for i in sort_idx]
+    t_end_sorted = [time_end_list[i] for i in sort_idx]
+    tcm_sorted = [time_cell_method_list[i] for i in sort_idx]
+
+    # Use the cell_method from the first timestep for the whole file.
+    # Within a single run all files are consistently either time-mean or snapshot.
+    time_cell_method = tcm_sorted[0] if tcm_sorted else "time: point"
+    has_time_bounds = any(is_mean_sorted)
+    time_arr = np.asarray(times_sorted)
+
+    def _sort(arr_list):
+        """Return arr_list reordered by sort_idx."""
+        return [arr_list[i] for i in sort_idx]
+
+    # -----------------------------------------------------------------------
+    # Phase 3: shared file-setup and write helpers
+    # -----------------------------------------------------------------------
+    ny, nx_size = len(y), len(x)
+    crs_name = "crs"
+    grid_mapping = crs_name if epsg is not None else None
+
+    # Attempt to compute 2-D lat/lon auxiliary coordinates (requires pyproj).
+    # lat/lon are required by CF-1.12 / CMOR for projected-coordinate grids.
+    lat_2d = lon_2d = None
+    if epsg is not None and epsg != 4326:
+        try:
+            lat_2d, lon_2d = compute_latlon_arrays(x, y, epsg)
+        except ImportError as _exc:
+            import warnings
+            warnings.warn(
+                f"pyproj is not installed; lat/lon auxiliary coordinates will "
+                f"not be written (CF/CMOR compliance requires them). "
+                f"Install pyproj with: pip install pyproj\n"
+                f"Original error: {_exc}",
+                stacklevel=2,
+            )
+    has_latlon = lat_2d is not None
+    coords_str = "lat lon" if has_latlon else ""
 
     global_attrs = get_global_attributes(
         institution=institution,
@@ -477,144 +663,195 @@ def write_cmip7_netcdf(
     if extra_attrs:
         global_attrs.update(extra_attrs)
 
-    ny, nx = len(y), len(x)
-    crs_name = "crs"
+    # Pre-build time-bounds lists once (used inside _setup_ds)
+    if has_time_bounds:
+        _tb_start = [
+            t_start_sorted[i] if is_mean_sorted[i] else times_sorted[i]
+            for i in range(len(times_sorted))
+        ]
+        _tb_end = [
+            t_end_sorted[i] if is_mean_sorted[i] else times_sorted[i]
+            for i in range(len(times_sorted))
+        ]
+    else:
+        _tb_start = _tb_end = None
 
-    with Dataset(str(output_nc), "w", format="NETCDF4") as ds:
+    def _setup_ds(ds):
+        """Populate dimensions, coordinates, and global attributes."""
         ds.setncatts(global_attrs)
-
-        # Dimensions
-        ds.createDimension("time", 1)
+        ds.createDimension("time", len(times_sorted))
         ds.createDimension("y", ny)
-        ds.createDimension("x", nx)
-
-        # Coordinate variables
+        ds.createDimension("x", nx_size)
         add_xy_variables(ds, x, y, epsg_code=epsg)
-        if time_years is not None:
-            add_time_variable(ds, [time_years], reference_year=reference_year, calendar=calendar)
-            if is_time_mean and time_start_years is not None:
-                add_time_bounds(
-                    ds,
-                    [time_start_years],
-                    [time_end_years],
-                    reference_year=reference_year,
-                    calendar=calendar,
-                )
-
-        # CRS (grid_mapping) variable
+        add_time_variable(ds, time_arr, reference_year=reference_year, calendar=calendar)
+        if has_time_bounds:
+            add_time_bounds(ds, _tb_start, _tb_end,
+                            reference_year=reference_year, calendar=calendar)
         if epsg is not None:
             add_crs_variable(ds, epsg, x0=x0, y0=y0)
-        grid_mapping = crs_name if epsg is not None else None
+        if has_latlon:
+            add_latlon_variables(ds, lat_2d, lon_2d)
 
-        # ------------------------------------------------------------------
-        # Write data variables
-        # Track which input variable names have been written.
-        written_bisicles_names = set()   # BISICLES internal names (FIELD_MAPPING)
-        written_cf_names = set()         # CF/CMIP7 output names (CF_FIELD_MAPPING)
+    output_files = []
 
-        def _write_var(ds, out_name, arr_raw, mapping, time_cell_method,
-                       grid_mapping, bisicles_name=None):
-            """Write one 2-D data variable with full CF/CMIP7 metadata."""
-            arr = arr_raw * mapping["conversion_factor"]
-            arr = np.where(np.isnan(arr), FILL_VALUE, arr)
-            arr = arr[np.newaxis, :, :]  # add time dimension
-            # cell_methods is stored in CMIP7 format with "time: mean" embedded.
-            # For snapshot files substitute "time: point" in place of "time: mean".
-            cell_methods = mapping["cell_methods"]
-            if time_cell_method == "time: point":
-                cell_methods = cell_methods.replace("time: mean", "time: point")
-            var = ds.createVariable(
-                out_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
-            )
-            var[:] = arr
-            var.standard_name = mapping["standard_name"]
-            var.long_name = mapping["long_name"]
-            var.units = mapping["cmip7_units"]
-            var.cell_methods = cell_methods
-            var.modeling_realm = mapping["modeling_realm"]
-            var.coordinates = "time y x"
-            if grid_mapping:
-                var.grid_mapping = grid_mapping
-            if "comment" in mapping:
-                var.comment = mapping["comment"]
-            if bisicles_name is not None:
-                var.bisicles_name = bisicles_name
-            var.bisicles_units = mapping["bisicles_units"]
+    # -----------------------------------------------------------------------
+    # Phase 4: write one file per variable
+    # -----------------------------------------------------------------------
 
-        # 1. BISICLES internal name -> CMIP7 (standard plot files)
-        for bisicles_name, mapping in FIELD_MAPPING.items():
-            if bisicles_name not in variables:
-                continue
-            _write_var(ds, mapping["cmip7_name"], variables[bisicles_name],
-                       mapping, time_cell_method, grid_mapping,
-                       bisicles_name=bisicles_name)
-            written_bisicles_names.add(bisicles_name)
+    # 1. BISICLES internal name -> CMIP7 (standard plot files)
+    for bisicles_name, mapping in FIELD_MAPPING.items():
+        if bisicles_name not in bisicles_arrays:
+            continue
+        arr_stack = np.stack(_sort(bisicles_arrays[bisicles_name]), axis=0)
+        out_name = mapping["cmip7_name"]
+        out_path = output_dir / f"{out_name}_cmip7.nc"
+        with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+            _setup_ds(ds)
+            _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
+                          grid_mapping, bisicles_name=bisicles_name,
+                          coordinates=coords_str)
+        output_files.append(out_path)
 
-        # 1b. BISICLES CF output name -> CMIP7 (CF-plot files: plot.CF-*.hdf5)
-        # Variable names in the file are already CMIP7-compatible but need
-        # unit conversion (per-year -> per-second) and full CF metadata.
-        for cf_name, mapping in CF_FIELD_MAPPING.items():
-            if cf_name not in variables:
-                continue
-            if cf_name in written_cf_names:
-                continue  # already written (shouldn't happen, but be safe)
-            _write_var(ds, mapping["cmip7_name"], variables[cf_name],
-                       mapping, time_cell_method, grid_mapping)
-            written_cf_names.add(cf_name)
+    # 2. CF-output name -> CMIP7 (plot.CF-*.hdf5 files)
+    for cf_name, mapping in CF_FIELD_MAPPING.items():
+        if cf_name not in cf_arrays:
+            continue
+        arr_stack = np.stack(_sort(cf_arrays[cf_name]), axis=0)
+        out_name = mapping["cmip7_name"]
+        out_path = output_dir / f"{out_name}_cmip7.nc"
+        with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+            _setup_ds(ds)
+            _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
+                          grid_mapping, coordinates=coords_str)
+        output_files.append(out_path)
 
-        # 2. Derived fields (sftgrf, sftflf computed from iceFrac + mask).
-        # Skip any that were already written directly from the CF-plot file.
-        for derived_name, dmeta in DERIVED_FIELDS.items():
-            if derived_name in written_cf_names:
-                continue  # CF file provided these directly; don't overwrite
-            if derived_name not in variables:
-                continue
-            arr = variables[derived_name] * dmeta["conversion_factor"]
-            arr = np.where(np.isnan(arr), FILL_VALUE, arr)
-            arr = arr[np.newaxis, :, :]
-            cell_methods = dmeta["cell_methods"]
-            if time_cell_method == "time: point":
-                cell_methods = cell_methods.replace("time: mean", "time: point")
+    # 3. Derived fields (sftgrf, sftflf) – skip if CF file already provided them
+    for derived_name, dmeta in DERIVED_FIELDS.items():
+        if derived_name in cf_arrays:
+            continue
+        if derived_name not in derived_arrays:
+            continue
+        arr_stack = np.stack(_sort(derived_arrays[derived_name]), axis=0)
+        arr_stack = arr_stack * dmeta["conversion_factor"]
+        arr_stack = np.where(np.isnan(arr_stack), FILL_VALUE, arr_stack)
+        cell_methods = dmeta["cell_methods"]
+        if time_cell_method == "time: point":
+            cell_methods = cell_methods.replace("time: mean", "time: point")
+        out_path = output_dir / f"{derived_name}_cmip7.nc"
+        with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+            _setup_ds(ds)
             var = ds.createVariable(
                 derived_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
             )
-            var[:] = arr
+            var[:] = arr_stack
             var.standard_name = dmeta["standard_name"]
             var.long_name = dmeta["long_name"]
             var.units = dmeta["cmip7_units"]
+            var.missing_value = np.float32(FILL_VALUE)
             var.cell_methods = cell_methods
             var.modeling_realm = dmeta["modeling_realm"]
-            var.coordinates = "time y x"
+            if coords_str:
+                var.coordinates = coords_str
             if grid_mapping:
                 var.grid_mapping = grid_mapping
             if "comment" in dmeta:
                 var.comment = dmeta["comment"]
-            if derived_name in derived_sources:
-                var.derived_from = derived_sources[derived_name]
+            if derived_name in derived_src:
+                var.derived_from = derived_src[derived_name]
+        output_files.append(out_path)
 
-        # 3. Truly unmapped variables (preserved unless cmip7_only=True)
-        if not cmip7_only:
-            for bname, arr in variables.items():
-                if bname in written_bisicles_names:
-                    continue
-                if bname in written_cf_names:
-                    continue
-                if bname in DERIVED_FIELDS:
-                    continue  # derived, already handled above
-                if arr.ndim < 2:
-                    continue
-                safe_name = bname.replace("/", "_")
-                arr_out = np.where(np.isnan(arr), FILL_VALUE, arr)
-                arr_out = arr_out[np.newaxis, :, :]
+    # 4. Unmapped BISICLES variables (preserved unless cmip7_only=True)
+    if not cmip7_only:
+        for bname, arr_list in unmapped_arrays.items():
+            arr_stack = np.stack(_sort(arr_list), axis=0)
+            arr_stack = np.where(np.isnan(arr_stack), FILL_VALUE, arr_stack)
+            safe_name = bname.replace("/", "_")
+            out_path = output_dir / f"{safe_name}_cmip7.nc"
+            with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+                _setup_ds(ds)
                 var = ds.createVariable(
                     safe_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
                 )
-                var[:] = arr_out
+                var[:] = arr_stack
                 var.long_name = bname
-                var.coordinates = "time y x"
+                var.missing_value = np.float32(FILL_VALUE)
+                if coords_str:
+                    var.coordinates = coords_str
                 var.note = "Unmapped BISICLES field; units as in original plot file."
                 if grid_mapping:
                     var.grid_mapping = grid_mapping
+            output_files.append(out_path)
+
+    return output_files
+
+
+# ---------------------------------------------------------------------------
+# Internal helper: run flatten tool and read result for one plot file
+# ---------------------------------------------------------------------------
+
+def _flatten_plot_file(
+    plot_file,
+    exe_path,
+    level=0,
+    x0=None,
+    y0=None,
+    keep_intermediate=False,
+    intermediate_nc=None,
+    verbose=False,
+):
+    """
+    Run the flatten executable on *plot_file* and return the parsed data.
+
+    Parameters
+    ----------
+    plot_file : Path
+        Input BISICLES plot HDF5 file.
+    exe_path : str or Path
+        Full path to the flatten executable.
+    level : int
+        AMR level to flatten onto.
+    x0, y0 : float, optional
+        Grid origin overrides.
+    keep_intermediate : bool
+        If True, keep the intermediate NetCDF file (written next to
+        *intermediate_nc* or alongside *plot_file*).
+    intermediate_nc : Path, optional
+        Explicit path for the intermediate file.  A temporary file is used
+        when not supplied.
+    verbose : bool
+        Print progress messages.
+
+    Returns
+    -------
+    tuple (flatten_data, file_info)
+        *flatten_data* is the dict from :func:`_read_flatten_nc`;
+        *file_info* is from :func:`~.filename_parser.parse_bisicles_filename`
+        (may be ``None`` for non-UKESM filenames).
+    """
+    if keep_intermediate and intermediate_nc is not None:
+        tmp_nc = intermediate_nc
+        _tmp_path = None
+    else:
+        fd, _tmp = tempfile.mkstemp(suffix=".nc", prefix="bisicles_flatten_")
+        os.close(fd)
+        tmp_nc = Path(_tmp)
+        _tmp_path = tmp_nc
+
+    file_info = parse_bisicles_filename(plot_file)
+
+    try:
+        if verbose:
+            print(f"  Flattening {plot_file.name} onto level {level}...")
+        run_flatten(plot_file, tmp_nc, exe_path=exe_path, level=level, x0=x0, y0=y0)
+
+        if verbose:
+            print(f"  Reading flattened data...")
+        flatten_data = _read_flatten_nc(tmp_nc)
+    finally:
+        if _tmp_path is not None and _tmp_path.exists():
+            os.unlink(_tmp_path)
+
+    return flatten_data, file_info
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +860,7 @@ def write_cmip7_netcdf(
 
 def process_plotfile(
     plot_file,
-    output_nc,
+    output_dir,
     exe_path,
     level=0,
     epsg_code=None,
@@ -640,16 +877,18 @@ def process_plotfile(
     **nc_kwargs,
 ):
     """
-    Flatten a BISICLES plot HDF5 file and write a CMIP7/CF-compliant NetCDF.
+    Flatten a BISICLES plot HDF5 file and write one CMIP7/CF-compliant NetCDF
+    per variable into *output_dir*.
 
-    This is the main entry point for processing a single plot file.
+    Each output file is named ``{cmip7_name}_cmip7.nc`` and contains a single
+    data variable with a time dimension of size 1 (the single input timestep).
 
     Parameters
     ----------
     plot_file : str or Path
         Input BISICLES plot HDF5 file.
-    output_nc : str or Path
-        Output CF/CMIP7 NetCDF file.
+    output_dir : str or Path
+        Directory for output NetCDF files.  Created if it does not exist.
     exe_path : str or Path
         Full path to the flatten executable.
     level : int
@@ -679,26 +918,26 @@ def process_plotfile(
         Minimum ice thickness threshold in metres for the mask/iceFrac fallback
         (default 1.0 m).
     keep_intermediate : bool
-        If True, keep the intermediate flatten NetCDF file (saved next to
-        output_nc with suffix ``_flatten_raw.nc``).
+        If True, keep the intermediate flatten NetCDF file (written to
+        *output_dir* with suffix ``_flatten_raw.nc``).
     verbose : bool
         Print progress messages.
     **nc_kwargs
-        Keyword arguments for :func:`write_cmip7_netcdf`
+        Keyword arguments for :func:`write_cmip7_per_variable_netcdfs`
         (institution, source, experiment, variant_label, ice_sheet, extra_attrs).
+
+    Returns
+    -------
+    list of Path
+        Paths of output NetCDF files written.
     """
     plot_file = Path(plot_file)
-    output_nc = Path(output_nc)
+    output_dir = Path(output_dir)
 
-    # Intermediate file location
+    intermediate_nc = None
     if keep_intermediate:
-        intermediate_nc = output_nc.with_name(
-            output_nc.stem + "_flatten_raw" + output_nc.suffix
-        )
-    else:
-        fd, _tmp = tempfile.mkstemp(suffix=".nc", prefix="bisicles_flatten_")
-        os.close(fd)
-        intermediate_nc = Path(_tmp)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        intermediate_nc = output_dir / (plot_file.stem.replace(".2d", "") + "_flatten_raw.nc")
 
     # Parse simulation time from the filename (UKESM BISICLES internal
     # time is always 0, so the filename is the authoritative source).
@@ -724,49 +963,44 @@ def process_plotfile(
         if verbose:
             print(f"  Using UKESM default grid origin: x0={x0}, y0={y0}")
 
-    try:
-        if verbose:
-            print(f"Flattening {plot_file.name} onto level {level}...")
-        run_flatten(
-            plot_file,
-            intermediate_nc,
-            level=level,
-            exe_path=exe_path,
-            x0=x0,
-            y0=y0,
-        )
+    if verbose:
+        print(f"Flattening {plot_file.name} onto level {level}...")
 
-        if verbose:
-            print(f"Reading flattened data from {intermediate_nc.name}...")
-        flatten_data = _read_flatten_nc(intermediate_nc)
-
-        if verbose:
-            bisicles_vars = list(flatten_data["variables"].keys())
-            print(f"  Variables found: {bisicles_vars}")
-
-        if verbose:
-            print(f"Writing CMIP7 NetCDF to {output_nc}...")
-        write_cmip7_netcdf(
-            flatten_data,
-            output_nc,
-            epsg_code=epsg_code,
-            x0=x0,
-            y0=y0,
-            reference_year=reference_year,
-            calendar=calendar,
-            cmip7_only=cmip7_only,
-            ice_density=ice_density,
-            water_density=water_density,
-            h_min=h_min,
-            file_info=file_info,
-            **nc_kwargs,
-        )
-    finally:
-        if not keep_intermediate and intermediate_nc.exists():
-            os.unlink(intermediate_nc)
+    flatten_data, _ = _flatten_plot_file(
+        plot_file,
+        exe_path=exe_path,
+        level=level,
+        x0=x0,
+        y0=y0,
+        keep_intermediate=keep_intermediate,
+        intermediate_nc=intermediate_nc,
+        verbose=verbose,
+    )
 
     if verbose:
-        print("Done.")
+        bisicles_vars = list(flatten_data["variables"].keys())
+        print(f"  Variables found: {bisicles_vars}")
+        print(f"Writing per-variable CMIP7 NetCDF files to {output_dir}...")
+
+    output_files = write_cmip7_per_variable_netcdfs(
+        [(flatten_data, file_info)],
+        output_dir,
+        epsg_code=epsg_code,
+        x0=x0,
+        y0=y0,
+        reference_year=reference_year,
+        calendar=calendar,
+        cmip7_only=cmip7_only,
+        ice_density=ice_density,
+        water_density=water_density,
+        h_min=h_min,
+        **nc_kwargs,
+    )
+
+    if verbose:
+        print(f"Done. Wrote {len(output_files)} variable file(s).")
+
+    return output_files
 
 
 def process_directory(
@@ -788,20 +1022,23 @@ def process_directory(
     **nc_kwargs,
 ):
     """
-    Flatten all BISICLES plot files in a directory, writing one CMIP7 NetCDF
-    per plot file.
+    Flatten all BISICLES plot files in a directory and write one CMIP7 NetCDF
+    per variable, with all timesteps on a single time axis.
+
+    Each output file is named ``{cmip7_name}_cmip7.nc`` and its ``time``
+    dimension spans all input plot files in chronological order.
 
     Parameters
     ----------
     directory : str or Path
         Directory containing BISICLES plot HDF5 files.
+    exe_path : str or Path
+        Full path to the flatten executable.
     output_dir : str or Path, optional
         Directory to write output NetCDF files.  Defaults to the same directory
         as the input files.
     plot_pattern : str
         Glob pattern for plot files.
-    exe_path : str or Path
-        Full path to the flatten executable.
     level : int
         AMR level to flatten onto.
     epsg_code : int, optional
@@ -830,12 +1067,12 @@ def process_directory(
     verbose : bool
         Print progress messages.
     **nc_kwargs
-        Passed to :func:`write_cmip7_netcdf`.
+        Passed to :func:`write_cmip7_per_variable_netcdfs`.
 
     Returns
     -------
     list of Path
-        Paths of output NetCDF files written.
+        Paths of output NetCDF files written (one per variable).
     """
     from .diagnostics import find_plot_files
 
@@ -846,34 +1083,60 @@ def process_directory(
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Fall back to UKESM standard grid origins when x0/y0 not supplied
+    if (x0 is None or y0 is None) and epsg_code in UKESM_GRID_ORIGINS:
+        origin = UKESM_GRID_ORIGINS[epsg_code]
+        if x0 is None:
+            x0 = origin["x0"]
+        if y0 is None:
+            y0 = origin["y0"]
+        if verbose:
+            print(f"Using UKESM default grid origin: x0={x0}, y0={y0}")
+
     plot_files = find_plot_files(directory, pattern=plot_pattern)
     if verbose:
         print(f"Found {len(plot_files)} plot files in {directory}")
 
-    output_files = []
+    # Collect flattened data from all plot files before writing
+    all_data = []
     for i, pf in enumerate(plot_files):
-        out_nc = output_dir / (pf.stem.replace(".2d", "") + "_cmip7.nc")
         if verbose:
-            print(f"  [{i+1}/{len(plot_files)}] {pf.name} -> {out_nc.name}")
-        process_plotfile(
+            print(f"  [{i+1}/{len(plot_files)}] Flattening {pf.name}...")
+
+        # Parse filename for time info; override ice_sheet from first parseable file
+        file_info = parse_bisicles_filename(pf)
+        if file_info is not None and not nc_kwargs.get("ice_sheet"):
+            nc_kwargs["ice_sheet"] = file_info.ice_sheet
+
+        flatten_data, file_info = _flatten_plot_file(
             pf,
-            out_nc,
             exe_path=exe_path,
             level=level,
-            epsg_code=epsg_code,
             x0=x0,
             y0=y0,
-            reference_year=reference_year,
-            calendar=calendar,
-            cmip7_only=cmip7_only,
-            ice_density=ice_density,
-            water_density=water_density,
-            h_min=h_min,
             verbose=False,
-            **nc_kwargs,
         )
-        output_files.append(out_nc)
+        all_data.append((flatten_data, file_info))
 
     if verbose:
-        print(f"Done. Wrote {len(output_files)} files.")
+        print(f"Writing per-variable CMIP7 NetCDF files to {output_dir}...")
+
+    output_files = write_cmip7_per_variable_netcdfs(
+        all_data,
+        output_dir,
+        epsg_code=epsg_code,
+        x0=x0,
+        y0=y0,
+        reference_year=reference_year,
+        calendar=calendar,
+        cmip7_only=cmip7_only,
+        ice_density=ice_density,
+        water_density=water_density,
+        h_min=h_min,
+        **nc_kwargs,
+    )
+
+    if verbose:
+        print(f"Done. Wrote {len(output_files)} variable file(s).")
+
     return output_files

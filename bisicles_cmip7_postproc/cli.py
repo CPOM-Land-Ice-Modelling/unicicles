@@ -5,11 +5,11 @@ Provides three entry points:
 
   bike-cmip7-postproc-diagnostics
     Run the BISICLES diagnostics tool on a plot file or directory of plot files
-    and write a CF-compliant scalar timeseries NetCDF.
+    and write one CF-compliant scalar timeseries NetCDF per variable.
 
   bike-cmip7-postproc-flatten
-    Flatten BISICLES plot HDF5 file(s) onto a uniform grid and write
-    CMIP7/CF-compliant 2D spatial NetCDF file(s).
+    Flatten BISICLES plot HDF5 file(s) onto a uniform grid and write one
+    CMIP7/CF-compliant 2D spatial NetCDF per variable.
 
   bike-cmip7-postproc-run
     Run either workflow from a YAML or JSON config file.  All options that can
@@ -17,29 +17,29 @@ Provides three entry points:
 
 Usage examples
 --------------
-Single plot file (diagnostics timeseries with one timestep):
+Single plot file (diagnostics – one timestep per variable):
 
     bike-cmip7-postproc-diagnostics \\
         --input  /run/output/plot.000050.2d.hdf5 \\
-        --output diagnostics.nc \\
+        --output-dir /run/postproc/ \\
         --ice-sheet GrIS --institution "University of Bristol"
 
-Full run directory (time series):
+Full run directory (multi-year timeseries, one file per variable):
 
     bike-cmip7-postproc-diagnostics \\
         --input  /run/output/ \\
-        --output GrIS_diagnostics_timeseries.nc \\
+        --output-dir /run/postproc/ \\
         --ice-sheet GrIS --experiment historical --variant-label r1i1p1f3
 
-Single plot file (2D spatial fields):
+Single plot file (2D spatial fields – one file per variable):
 
     bike-cmip7-postproc-flatten \\
         --input  /run/output/plot.000050.2d.hdf5 \\
-        --output plot.000050_cmip7.nc \\
+        --output-dir /run/postproc/ \\
         --level 2 --epsg 3413 \\
         --ice-sheet GrIS --institution "University of Bristol"
 
-Full run directory:
+Full run directory (multi-year 2D fields, one file per variable):
 
     bike-cmip7-postproc-flatten \\
         --input  /run/output/ \\
@@ -124,8 +124,13 @@ def _build_diagnostics_parser():
         help="BISICLES plot HDF5 file or directory of plot files.",
     )
     p.add_argument(
-        "--output", "-o", required=False, default=None, metavar="NC_FILE",
-        help="Output CF NetCDF file path.",
+        "--output-dir", "-o", required=False, default=None, metavar="DIR",
+        dest="output_dir",
+        help=(
+            "Output directory for per-variable CF NetCDF files.  "
+            "One file per diagnostic variable is written into this directory.  "
+            "Defaults to the directory containing the input file(s)."
+        ),
     )
     p.add_argument(
         "--plot-pattern", default="plot.*.2d.hdf5", dest="plot_pattern",
@@ -178,8 +183,6 @@ def run_diagnostics_cli(args=None):
 
     if ns.input is None:
         parser.error("--input is required (or set 'input' in a --config file)")
-    if ns.output is None:
-        parser.error("--output is required (or set 'output' in a --config file)")
 
     from .diagnostics import process_single_file, process_directory
 
@@ -193,10 +196,15 @@ def run_diagnostics_cli(args=None):
 
     input_path = Path(ns.input)
 
+    # Default output directory to the location of the input file(s)
+    output_dir = ns.output_dir if ns.output_dir is not None else (
+        str(input_path) if input_path.is_dir() else str(input_path.parent)
+    )
+
     if input_path.is_dir():
         process_directory(
             directory=input_path,
-            output_nc=ns.output,
+            output_dir=output_dir,
             exe_path=ns.exe_path,
             plot_pattern=ns.plot_pattern,
             ice_density=ns.ice_density,
@@ -214,7 +222,7 @@ def run_diagnostics_cli(args=None):
     elif input_path.is_file():
         process_single_file(
             plot_file=input_path,
-            output_nc=ns.output,
+            output_dir=output_dir,
             exe_path=ns.exe_path,
             ice_density=ns.ice_density,
             water_density=ns.water_density,
@@ -258,17 +266,12 @@ def _build_flatten_parser():
         help="BISICLES plot HDF5 file or directory of plot files.",
     )
     p.add_argument(
-        "--output", "-o", metavar="NC_FILE", default=None,
+        "--output-dir", "-o", metavar="DIR", default=None, dest="output_dir",
         help=(
-            "Output CF NetCDF file (single-file mode). "
-            "Ignored when --input is a directory (use --output-dir instead)."
-        ),
-    )
-    p.add_argument(
-        "--output-dir", metavar="DIR", default=None, dest="output_dir",
-        help=(
-            "Output directory for NetCDF files (directory mode). "
-            "Defaults to the same directory as the input files."
+            "Output directory for per-variable NetCDF files.  "
+            "One file per CMIP7 variable is written into this directory, "
+            "named {cmip7_name}_cmip7.nc.  "
+            "Defaults to the same directory as the input file(s)."
         ),
     )
     p.add_argument(
@@ -379,10 +382,15 @@ def run_flatten_cli(args=None):
 
     input_path = Path(ns.input)
 
+    # Default output directory to the location of the input file(s)
+    output_dir = ns.output_dir if ns.output_dir is not None else (
+        str(input_path) if input_path.is_dir() else str(input_path.parent)
+    )
+
     if input_path.is_dir():
         process_directory(
             directory=input_path,
-            output_dir=ns.output_dir,
+            output_dir=output_dir,
             plot_pattern=ns.plot_pattern,
             exe_path=ns.exe_path,
             level=ns.level,
@@ -399,18 +407,9 @@ def run_flatten_cli(args=None):
             **nc_kwargs,
         )
     elif input_path.is_file():
-        if ns.output is None:
-            # Default output name: replace .2d.hdf5 with _cmip7.nc
-            out = input_path.with_name(
-                input_path.name.replace(".2d.hdf5", "_cmip7.nc")
-            )
-            if str(out) == str(input_path):
-                out = input_path.with_suffix("_cmip7.nc")
-        else:
-            out = Path(ns.output)
         process_plotfile(
             plot_file=input_path,
-            output_nc=out,
+            output_dir=output_dir,
             exe_path=ns.exe_path,
             level=ns.level,
             epsg_code=ns.epsg_code,

@@ -287,7 +287,7 @@ def _build_timeseries(records, filename_to_info=None):
 
 def write_diagnostics_netcdf(
     records,
-    output_nc,
+    output_dir,
     reference_year=1850,
     calendar="gregorian",
     ice_sheet="",
@@ -299,14 +299,20 @@ def write_diagnostics_netcdf(
     filename_to_info=None,
 ):
     """
-    Write a CF-compliant scalar timeseries NetCDF from parsed diagnostic records.
+    Write one CF-compliant scalar timeseries NetCDF per variable from parsed
+    diagnostic records.
+
+    Each output file is named ``{cmip7_name}.nc`` (or
+    ``{cmip7_name}_mask{N}.nc`` for regional-mask variants) inside
+    *output_dir* and contains a single data variable with a ``time`` dimension
+    spanning all timesteps.
 
     Parameters
     ----------
     records : list of dict
         Parsed diagnostic records as returned by :func:`parse_diagnostics_csv`.
-    output_nc : str or Path
-        Path for the output NetCDF file.
+    output_dir : str or Path
+        Directory for output NetCDF files.  Created if it does not exist.
     reference_year : int
         Reference year for the CF time axis (default 1850).
     calendar : str
@@ -330,8 +336,16 @@ def write_diagnostics_netcdf(
         filenames rather than from the CSV ``time`` field (which is always 0
         in UKESM-coupled runs).  Time-mean files will have a ``time_bnds``
         variable to satisfy CF-1.12 requirements.
+
+    Returns
+    -------
+    list of Path
+        Paths of output NetCDF files written (one per variable).
     """
     from netCDF4 import Dataset  # imported here to keep the module importable without netCDF4
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     times, data, meta, time_bounds = _build_timeseries(records, filename_to_info=filename_to_info)
     if not times:
@@ -356,36 +370,42 @@ def write_diagnostics_netcdf(
     # Determine whether any timesteps are time-mean (need time_bnds)
     has_time_bounds = any(v is not None for v in time_bounds.values())
 
-    with Dataset(str(output_nc), "w", format="NETCDF4") as ds:
-        ds.setncatts(global_attrs)
+    if has_time_bounds:
+        start_years = []
+        end_years = []
+        for t in times:
+            bnds = time_bounds.get(t)
+            if bnds is not None:
+                start_years.append(bnds[0])
+                end_years.append(bnds[1])
+            else:
+                # Snapshot: degenerate bounds equal to the time point
+                start_years.append(t)
+                end_years.append(t)
 
-        # Time dimension and variable
-        ds.createDimension("time", len(times))
-        add_time_variable(ds, time_arr, reference_year=reference_year, calendar=calendar)
+    output_files = []
 
-        # Time bounds for time-mean data
-        if has_time_bounds:
-            start_years = []
-            end_years = []
-            for t in times:
-                bnds = time_bounds.get(t)
-                if bnds is not None:
-                    start_years.append(bnds[0])
-                    end_years.append(bnds[1])
-                else:
-                    # Snapshot: degenerate bounds equal to the time point
-                    start_years.append(t)
-                    end_years.append(t)
-            add_time_bounds(ds, start_years, end_years, reference_year=reference_year, calendar=calendar)
+    # Write one file per (variable, mask) combination
+    for (cname, mask_no), time_dict in sorted(data.items()):
+        m = meta[cname]
 
-        # Data variables
-        for (cname, mask_no), time_dict in sorted(data.items()):
-            m = meta[cname]
+        # File and variable name
+        var_name = cname if mask_no == 0 else f"{cname}_mask{mask_no}"
+        out_path = output_dir / f"{var_name}.nc"
 
-            # Suffix mask number onto variable name when multiple masks present
-            var_name = cname if mask_no == 0 else f"{cname}_mask{mask_no}"
+        values = np.array([time_dict.get(t, np.nan) for t in times])
 
-            values = np.array([time_dict.get(t, np.nan) for t in times])
+        with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+            ds.setncatts(global_attrs)
+
+            # Time dimension and variable
+            ds.createDimension("time", len(times))
+            add_time_variable(ds, time_arr, reference_year=reference_year, calendar=calendar)
+
+            # Time bounds for time-mean data
+            if has_time_bounds:
+                add_time_bounds(ds, start_years, end_years,
+                                reference_year=reference_year, calendar=calendar)
 
             var = ds.createVariable(
                 var_name, "f8", ("time",), fill_value=FILL_VALUE
@@ -406,6 +426,10 @@ def write_diagnostics_netcdf(
                 var.mask_comment = (
                     f"Restricted to drainage-basin mask region {mask_no}."
                 )
+
+        output_files.append(out_path)
+
+    return output_files
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +460,7 @@ def _check_not_cf_mean(plot_file):
 
 def process_single_file(
     plot_file,
-    output_nc,
+    output_dir,
     exe_path,
     ice_density=918.0,
     water_density=1028.0,
@@ -450,12 +474,14 @@ def process_single_file(
     **nc_kwargs,
 ):
     """
-    Run diagnostics on a single plot file and write a CF timeseries NetCDF.
+    Run diagnostics on a single plot file and write one CF timeseries NetCDF
+    per variable into *output_dir*.
 
     Parameters
     ----------
     plot_file : str or Path
-    output_nc : str or Path
+    output_dir : str or Path
+        Directory for output NetCDF files.  Created if it does not exist.
     exe_path : str or Path
         Full path to the diagnostics executable.
     ice_density, water_density, gravity, h_min : float
@@ -468,6 +494,11 @@ def process_single_file(
     **nc_kwargs
         Passed to :func:`write_diagnostics_netcdf`
         (institution, source, experiment, variant_label, ice_sheet, extra_attrs).
+
+    Returns
+    -------
+    list of Path
+        Paths of output NetCDF files written.
     """
     plot_file = Path(plot_file)
     _check_not_cf_mean(plot_file)
@@ -492,9 +523,9 @@ def process_single_file(
             mask_no_end=mask_no_end,
         )
         records = parse_diagnostics_csv(csv_file)
-        write_diagnostics_netcdf(
+        return write_diagnostics_netcdf(
             records,
-            output_nc,
+            output_dir,
             reference_year=reference_year,
             calendar=calendar,
             filename_to_info=filename_to_info,
@@ -507,7 +538,7 @@ def process_single_file(
 
 def process_directory(
     directory,
-    output_nc,
+    output_dir,
     exe_path,
     plot_pattern="plot.*.2d.hdf5",
     ice_density=918.0,
@@ -524,14 +555,14 @@ def process_directory(
 ):
     """
     Run diagnostics on all plot files in a directory and write one CF
-    timeseries NetCDF covering the full simulation period.
+    timeseries NetCDF per variable, with all timesteps on a single time axis.
 
     Parameters
     ----------
     directory : str or Path
         Directory containing BISICLES plot HDF5 files.
-    output_nc : str or Path
-        Path for the output NetCDF file.
+    output_dir : str or Path
+        Directory for output NetCDF files.  Created if it does not exist.
     exe_path : str or Path
         Full path to the diagnostics executable.
     plot_pattern : str
@@ -551,6 +582,11 @@ def process_directory(
         Print progress messages.
     **nc_kwargs
         Passed to :func:`write_diagnostics_netcdf`.
+
+    Returns
+    -------
+    list of Path
+        Paths of output NetCDF files written.
     """
     plot_files = find_plot_files(directory, pattern=plot_pattern)
     if verbose:
@@ -594,12 +630,12 @@ def process_directory(
             )
 
         if verbose:
-            print(f"Parsing diagnostics and writing {output_nc}")
+            print(f"Parsing diagnostics and writing per-variable files to {output_dir}")
 
         records = parse_diagnostics_csv(csv_file)
-        write_diagnostics_netcdf(
+        output_files = write_diagnostics_netcdf(
             records,
-            output_nc,
+            output_dir,
             reference_year=reference_year,
             calendar=calendar,
             filename_to_info=filename_to_info,
@@ -607,7 +643,9 @@ def process_directory(
         )
 
         if verbose:
-            print("Done.")
+            print(f"Done. Wrote {len(output_files)} variable file(s).")
+
+        return output_files
     finally:
         if csv_file and Path(csv_file).exists():
             os.unlink(csv_file)

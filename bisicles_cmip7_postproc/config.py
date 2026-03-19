@@ -46,7 +46,7 @@ Example diagnostics config (YAML)::
     tool: diagnostics
 
     input: /scratch/dx030c/run/output/
-    output: /scratch/dx030c/postproc/GrIS_diagnostics.nc
+    output_dir: /scratch/dx030c/postproc/
 
     reference_year: 1850
     calendar: 360_day
@@ -152,7 +152,7 @@ def load_config(path):
 
 # Keys that are valid for process_plotfile / process_directory
 _FLATTEN_KEYS = {
-    "input", "output", "output_dir", "plot_pattern",
+    "input", "output_dir", "plot_pattern",
     "exe_path",                          # canonical executable path key
     "level", "epsg_code", "epsg",        # accept both forms
     "x0", "y0",
@@ -160,13 +160,13 @@ _FLATTEN_KEYS = {
     "cmip7_only", "keep_intermediate",
     "ice_density", "water_density", "h_min",
     "verbose",
-    # nc_kwargs (passed through to write_cmip7_netcdf)
+    # nc_kwargs (passed through to write_cmip7_per_variable_netcdfs)
     "institution", "source", "experiment", "variant_label", "ice_sheet",
     "extra_attrs",
 }
 
 _DIAG_KEYS = {
-    "input", "output",
+    "input", "output_dir",
     "plot_pattern", "exe_path",          # canonical executable path key
     "ice_density", "water_density", "gravity", "h_min",
     "mask_file", "mask_no_start", "mask_no_end",
@@ -226,10 +226,13 @@ def run_flatten_from_config(cfg, overrides=None):
     _normalise_flatten_cfg(cfg)
 
     input_path = Path(cfg.pop("input"))
-    output = cfg.pop("output", None)
     output_dir = cfg.pop("output_dir", None)
     plot_pattern = cfg.pop("plot_pattern", "plot.*.2d.hdf5")
     verbose = cfg.pop("verbose", True)
+
+    # Default output directory to the location of the input file(s)
+    if output_dir is None:
+        output_dir = str(input_path) if input_path.is_dir() else str(input_path.parent)
 
     # Split nc_kwargs from processing kwargs
     nc_kwargs = {k: cfg.pop(k) for k in list(cfg) if k in _NC_KWARGS_KEYS}
@@ -244,13 +247,9 @@ def run_flatten_from_config(cfg, overrides=None):
             **nc_kwargs,
         )
     elif input_path.is_file():
-        if output is None:
-            output = input_path.with_name(
-                input_path.name.replace(".2d.hdf5", "_cmip7.nc")
-            )
         process_plotfile(
             plot_file=input_path,
-            output_nc=output,
+            output_dir=output_dir,
             verbose=verbose,
             **cfg,
             **nc_kwargs,
@@ -280,16 +279,20 @@ def run_diagnostics_from_config(cfg, overrides=None):
     _normalise_diag_cfg(cfg)
 
     input_path = Path(cfg.pop("input"))
-    output = cfg.pop("output")
+    output_dir = cfg.pop("output_dir", None)
     plot_pattern = cfg.pop("plot_pattern", "plot.*.2d.hdf5")
     verbose = cfg.pop("verbose", True)
+
+    # Default output directory to the location of the input file(s)
+    if output_dir is None:
+        output_dir = str(input_path) if input_path.is_dir() else str(input_path.parent)
 
     nc_kwargs = {k: cfg.pop(k) for k in list(cfg) if k in _NC_KWARGS_KEYS}
 
     if input_path.is_dir():
         process_directory(
             directory=input_path,
-            output_nc=output,
+            output_dir=output_dir,
             plot_pattern=plot_pattern,
             verbose=verbose,
             **cfg,
@@ -298,7 +301,7 @@ def run_diagnostics_from_config(cfg, overrides=None):
     elif input_path.is_file():
         process_single_file(
             plot_file=input_path,
-            output_nc=output,
+            output_dir=output_dir,
             **cfg,
             **nc_kwargs,
         )

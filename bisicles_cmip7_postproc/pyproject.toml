@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 yaml = ["pyyaml"]   # recommended for YAML config files; JSON works without it
+geo  = ["pyproj"]   # required for 2-D lat/lon auxiliary coordinates (CF/CMOR compliance)
 
 [project.scripts]
 bike-cmip7-postproc-diagnostics = "bisicles_cmip7_postproc.cli:main_diagnostics"

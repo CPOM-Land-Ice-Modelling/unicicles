@@ -7,7 +7,7 @@
 #   bike-cmip7-postproc-run diagnostics_defaults.yaml
 #   bike-cmip7-postproc-diagnostics --config diagnostics_defaults.yaml
 #
-# Copy this file, set 'input', 'output', and the CF metadata fields, then run.
+# Copy this file, set 'input', 'output_dir', and the CF metadata fields, then run.
 # Any option left as null will use the built-in default.
 
 tool: diagnostics
@@ -20,8 +20,10 @@ tool: diagnostics
 # Path to a BISICLES plot HDF5 file or a directory of plot files. [required]
 input: null
 
-# Output CF NetCDF timeseries file. [required]
-output: null
+# Output directory for per-variable CF NetCDF files.
+# One file per diagnostic variable is written, named {cmip7_name}.nc.
+# Defaults to the same directory as the input file(s) when left as null.
+output_dir: null
 
 # Glob pattern used to find plot files when 'input' is a directory.
 plot_pattern: "plot.*.2d.hdf5"

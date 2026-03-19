@@ -6,6 +6,7 @@ Provides helpers for:
   - CF time coordinate encoding (BISICLES years -> CF days since reference)
   - Grid mapping (CRS) variable attributes for common BISICLES projections
   - Adding CF coordinate attributes to existing variables
+  - Computing 2-D lat/lon auxiliary coordinates from projected grids (requires pyproj)
 """
 
 import datetime
@@ -30,6 +31,9 @@ def get_global_attributes(
     ice_sheet="",
     references="",
     extra_history="",
+    grid_label="gn",
+    grid="",
+    nominal_resolution="",
     **kwargs,
 ):
     """
@@ -51,6 +55,14 @@ def get_global_attributes(
         Relevant references or DOIs.
     extra_history : str
         Additional history text prepended before the auto-generated entry.
+    grid_label : str
+        CMIP grid label.  ``"gn"`` (native grid, default) means the data are
+        on the model's native projected grid rather than regridded.
+    grid : str
+        Human-readable description of the grid, e.g.
+        ``"Antarctic Polar Stereographic (EPSG:3031)"``.
+    nominal_resolution : str
+        Approximate grid spacing as a CMIP string, e.g. ``"5 km"``.
     **kwargs
         Any additional key-value pairs to include as global attributes.
     """
@@ -68,6 +80,9 @@ def get_global_attributes(
         "variant_label": variant_label,
         "ice_sheet": ice_sheet,
         "references": references,
+        "grid_label": grid_label,
+        "grid": grid,
+        "nominal_resolution": nominal_resolution,
     }
     # Add any extra kwargs
     attrs.update(kwargs)
@@ -169,6 +184,19 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
                 'PARAMETER["false_northing",0],'
                 'UNIT["metre",1]]'
             ),
+            # spatial_ref duplicates crs_wkt for GDAL/OGR compatibility
+            "spatial_ref": (
+                'PROJCS["WGS 84 / Antarctic Polar Stereographic",'
+                'GEOGCS["WGS 84",DATUM["WGS_1984",'
+                'SPHEROID["WGS 84",6378137,298.257223563]],'
+                'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
+                'PROJECTION["Polar_Stereographic"],'
+                'PARAMETER["latitude_of_origin",-71],'
+                'PARAMETER["central_meridian",0],'
+                'PARAMETER["false_easting",0],'
+                'PARAMETER["false_northing",0],'
+                'UNIT["metre",1]]'
+            ),
             "proj4_params": (
                 "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 "
                 "+k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
@@ -187,6 +215,19 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
             "semi_major_axis": 6378137.0,
             "inverse_flattening": 298.257223563,
             "crs_wkt": (
+                'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",'
+                'GEOGCS["WGS 84",DATUM["WGS_1984",'
+                'SPHEROID["WGS 84",6378137,298.257223563]],'
+                'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
+                'PROJECTION["Polar_Stereographic"],'
+                'PARAMETER["latitude_of_origin",70],'
+                'PARAMETER["central_meridian",-45],'
+                'PARAMETER["false_easting",0],'
+                'PARAMETER["false_northing",0],'
+                'UNIT["metre",1]]'
+            ),
+            # spatial_ref duplicates crs_wkt for GDAL/OGR compatibility
+            "spatial_ref": (
                 'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",'
                 'GEOGCS["WGS 84",DATUM["WGS_1984",'
                 'SPHEROID["WGS 84",6378137,298.257223563]],'
@@ -372,3 +413,89 @@ def add_crs_variable(ds, epsg_code, x0=None, y0=None):
     crs_var[:] = 1
     crs_var.setncatts(attrs)
     return crs_var
+
+
+def compute_latlon_arrays(x, y, epsg_code):
+    """
+    Compute 2-D latitude and longitude arrays from projected x/y coordinates.
+
+    Requires the ``pyproj`` package (``pip install pyproj`` or
+    ``pip install bisicles-cmip7-postproc[geo]``).
+
+    Parameters
+    ----------
+    x : array-like, shape (nx,)
+        Projected x coordinates in metres.
+    y : array-like, shape (ny,)
+        Projected y coordinates in metres.
+    epsg_code : int
+        EPSG code of the source projection (e.g. 3031 or 3413).
+
+    Returns
+    -------
+    lat_2d : ndarray, shape (ny, nx)
+        Latitude values in degrees north.
+    lon_2d : ndarray, shape (ny, nx)
+        Longitude values in degrees east.
+
+    Raises
+    ------
+    ImportError
+        If ``pyproj`` is not installed.
+    """
+    try:
+        from pyproj import Transformer
+    except ImportError:
+        raise ImportError(
+            "pyproj is required to compute lat/lon coordinate arrays. "
+            "Install it with:\n"
+            "    pip install pyproj\n"
+            "or:\n"
+            "    pip install 'bisicles-cmip7-postproc[geo]'"
+        )
+    transformer = Transformer.from_crs(
+        f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True
+    )
+    xx, yy = np.meshgrid(x, y)
+    lon_2d, lat_2d = transformer.transform(xx, yy)
+    return lat_2d, lon_2d
+
+
+def add_latlon_variables(ds, lat_2d, lon_2d):
+    """
+    Add CF-compliant 2-D ``lat(y, x)`` and ``lon(y, x)`` auxiliary coordinate
+    variables to an open NetCDF4 Dataset.
+
+    These are *auxiliary* coordinate variables (not dimension coordinates) and
+    must be listed in the ``coordinates`` attribute of data variables, as
+    required by CF-1.12 for projected grids.
+
+    Parameters
+    ----------
+    ds : netCDF4.Dataset
+        Open dataset (must already have ``y`` and ``x`` dimensions).
+    lat_2d : ndarray, shape (ny, nx)
+        Latitude values in degrees north.
+    lon_2d : ndarray, shape (ny, nx)
+        Longitude values in degrees east.
+
+    Returns
+    -------
+    lat_var, lon_var : netCDF4.Variable
+        The created latitude and longitude variables.
+    """
+    lat_var = ds.createVariable("lat", "f8", ("y", "x"))
+    lat_var[:] = lat_2d
+    lat_var.standard_name = "latitude"
+    lat_var.long_name = "Latitude"
+    lat_var.units = "degrees_north"
+
+    lon_var = ds.createVariable("lon", "f8", ("y", "x"))
+    lon_var[:] = lon_2d
+    lon_var.standard_name = "longitude"
+    lon_var.long_name = "Longitude"
+    lon_var.units = "degrees_east"
+
+    return lat_var, lon_var
+
+
