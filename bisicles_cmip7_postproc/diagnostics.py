@@ -397,6 +397,7 @@ def write_diagnostics_netcdf(
 
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             ds.setncatts(global_attrs)
+            ds.title = f"UniCiCles (BISICLES) output from UKESM: {m['long_name']}"
 
             # Time dimension and variable
             ds.createDimension("time", len(times))

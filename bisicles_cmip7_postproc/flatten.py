@@ -60,6 +60,7 @@ from .cmip7_vars import (
     FIELD_MAPPING,
     CF_FIELD_MAPPING,
     DERIVED_FIELDS,
+    GRID_GEOMETRY_FIELDS,
     GROUNDED_MASK_VAL,
     FLOATING_MASK_VAL,
     OPEN_SEA_MASK_VAL,
@@ -707,6 +708,10 @@ def write_cmip7_per_variable_netcdfs(
         out_path = output_dir / f"{out_name}_cmip7.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
+            ds.title = (
+                f"UniCiCles (BISICLES) output from UKESM: "
+                f"{mapping['long_name']}"
+            )
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
                           grid_mapping, bisicles_name=bisicles_name,
                           coordinates=coords_str)
@@ -721,6 +726,10 @@ def write_cmip7_per_variable_netcdfs(
         out_path = output_dir / f"{out_name}_cmip7.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
+            ds.title = (
+                f"UniCiCles (BISICLES) output from UKESM: "
+                f"{mapping['long_name']}"
+            )
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
                           grid_mapping, coordinates=coords_str)
         output_files.append(out_path)
@@ -740,6 +749,10 @@ def write_cmip7_per_variable_netcdfs(
         out_path = output_dir / f"{derived_name}_cmip7.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
+            ds.title = (
+                f"UniCiCles (BISICLES) output from UKESM: "
+                f"{dmeta['long_name']}"
+            )
             var = ds.createVariable(
                 derived_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
             )
@@ -769,6 +782,7 @@ def write_cmip7_per_variable_netcdfs(
             out_path = output_dir / f"{safe_name}_cmip7.nc"
             with Dataset(str(out_path), "w", format="NETCDF4") as ds:
                 _setup_ds(ds)
+                ds.title = f"UniCiCles (BISICLES) output from UKESM: {bname}"
                 var = ds.createVariable(
                     safe_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
                 )
@@ -781,6 +795,36 @@ def write_cmip7_per_variable_netcdfs(
                 if grid_mapping:
                     var.grid_mapping = grid_mapping
             output_files.append(out_path)
+
+    # 5. Grid-geometry fields (modelcellareai) — computed from x/y, no time dim
+    dx = abs(float(x[1] - x[0])) if nx_size > 1 else 1.0
+    dy = abs(float(y[1] - y[0])) if ny > 1 else 1.0
+    cell_area = np.full((ny, nx_size), dx * dy, dtype=np.float64)
+
+    for geom_name, gmeta in GRID_GEOMETRY_FIELDS.items():
+        out_path = output_dir / f"{geom_name}_cmip7.nc"
+        with Dataset(str(out_path), "w", format="NETCDF4") as ds:
+            ds.setncatts(global_attrs)
+            ds.title = f"UniCiCles (BISICLES) output from UKESM: {gmeta['long_name']}"
+            ds.createDimension("y", ny)
+            ds.createDimension("x", nx_size)
+            add_xy_variables(ds, x, y, epsg_code=epsg)
+            if epsg is not None:
+                add_crs_variable(ds, epsg, x0=x0, y0=y0)
+            if has_latlon:
+                add_latlon_variables(ds, lat_2d, lon_2d)
+            var = ds.createVariable(geom_name, "f8", ("y", "x"))
+            var[:] = cell_area
+            var.standard_name = gmeta["standard_name"]
+            var.long_name = gmeta["long_name"]
+            var.units = gmeta["cmip7_units"]
+            var.cell_methods = gmeta["cell_methods"]
+            var.modeling_realm = gmeta["modeling_realm"]
+            if coords_str:
+                var.coordinates = coords_str
+            if grid_mapping:
+                var.grid_mapping = grid_mapping
+        output_files.append(out_path)
 
     return output_files
 

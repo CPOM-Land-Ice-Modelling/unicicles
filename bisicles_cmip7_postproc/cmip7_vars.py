@@ -613,6 +613,24 @@ DERIVED_FIELDS = {
 
 
 # ---------------------------------------------------------------------------
+# Grid-geometry fields
+#
+# These are not read from BISICLES plot files but computed from the output
+# grid coordinates.  Each is a static (time-invariant) spatial field.
+# ---------------------------------------------------------------------------
+GRID_GEOMETRY_FIELDS = {
+    "modelcellareai": {
+        "standard_name": "cell_area",
+        "long_name": "Model Grid-Cell Area for Ice-Sheet Variables",
+        "cmip7_units": "m2",
+        "cell_methods": "area: sum",
+        "modeling_realm": "landIce",
+        "cmip7_compliant": True,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Scalar diagnostic variable mapping
 #
 # Maps (region, quantity) pairs from the diagnostics CSV output to CMIP7
