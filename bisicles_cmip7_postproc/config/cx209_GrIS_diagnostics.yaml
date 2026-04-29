@@ -1,0 +1,11 @@
+tool: diagnostics
+
+input: /gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/raw_data/cx209/icesheet
+
+output_dir: /gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/raw_data/cx209/cmor
+
+plot_pattern: "*plot-GrIS.hdf5"
+
+exe_path: /home/users/tm17544/Code/BISICLES/bisicles-uob/code/filetools/diagnostics2d.Linux.64.c++.gfortran.DEBUG.OPT.GNU.ex
+
+calendar: 360_day
