@@ -122,7 +122,7 @@ def load_config(path):
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
 
     if path.suffix.lower() == ".json":
         return json.loads(text)
@@ -238,6 +238,7 @@ def run_flatten_from_config(cfg, overrides=None):
     nc_kwargs = {k: cfg.pop(k) for k in list(cfg) if k in _NC_KWARGS_KEYS}
 
     if input_path.is_dir():
+        cfg.pop("keep_intermediate", None)  # only valid for single-file mode
         process_directory(
             directory=input_path,
             output_dir=output_dir,

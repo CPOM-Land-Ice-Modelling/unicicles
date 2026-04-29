@@ -15,3 +15,24 @@ level: 0
 
 calendar: 360_day
 
+extra_attrs:
+  experiment_id: "Up-8GtC"
+  mo_runid: "u-cx209"
+  activity_id: "TerraFIRMA"
+  institution: "Met Office Hadley Centre, Fitzroy Road, Exeter, Devon, EX1 3PB, UK"
+  institution_id: "MOHC"
+  mip_era: "GCModelDev"
+  source_id: "eUKESM1-1-ice-N96ORCA1 (2024)"
+  source_type: "AOGCM ISM"
+  forcing_index: 1
+  initialization_index: 1
+  physics_index: 1
+  realization_index: 1
+  branch_method: "no parent"
+  further_info_url: "none"
+  product: "model-output"
+  license: "Open Government License v3"
+  data_specs_version: "GCModelDev v0.0.17"
+  grid: "Native Polar Stereographic grid"
+  variant_label: "r1i1p1f1"
+

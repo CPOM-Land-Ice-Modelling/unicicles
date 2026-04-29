@@ -88,6 +88,11 @@ reference_year: 1850
 #   360_day    — 360 days/year (UKESM coupled runs)
 calendar: gregorian
 
+# CMIP output frequency string written to global attributes.
+# Auto-detected from the filename period field when left null.
+# Common values: yr, mon, day, 6hr, 3hr, hr
+frequency: null
+
 
 # ---------------------------------------------------------------------------
 # Flotation mask fallback
@@ -120,8 +125,26 @@ variant_label: ""
 #   AIS   — Antarctic Ice Sheet
 ice_sheet: ""
 
-# Any additional global attributes as key-value pairs, e.g.:
+# Additional global attributes as key-value pairs.
+# Use this for CMIP/project metadata that cannot be derived automatically.
+# Attributes written automatically: creation_date, variable_id, variable_name,
+#   frequency (from filename), realm (landIce), source_file (from filename).
+#
+# Example CMIP-style attributes:
 #   extra_attrs:
-#     contact: your.name@institution.ac.uk
-#     references: https://doi.org/10.5194/gmd-xx-xxxx-xxxx
+#     activity_id: TerraFIRMA
+#     experiment_id: Up-8GtC
+#     institution_id: MOHC
+#     mip_era: CMIP7
+#     source_id: eUKESM1-1-ice-N96ORCA1
+#     source_type: AOGCM ISM
+#     mo_runid: u-cx209
+#     forcing_index: 1
+#     initialization_index: 1
+#     physics_index: 1
+#     realization_index: 1
+#     branch_method: "no parent"
+#     further_info_url: "none"
+#     product: model-output
+#     license: "Open Government License v3"
 extra_attrs: null

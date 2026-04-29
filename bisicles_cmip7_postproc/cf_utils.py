@@ -15,6 +15,25 @@ import numpy as np
 CF_CONVENTIONS = "CF-1.12 CMIP-7.0"
 FILL_VALUE = 1.0e20
 
+# Mapping from BISICLES filename period strings to CMIP frequency strings.
+_PERIOD_TO_CMIP_FREQUENCY = {
+    "1y":  "yr",
+    "10y": "dec",
+    "1m":  "mon",
+    "1d":  "day",
+    "6h":  "6hr",
+    "3h":  "3hr",
+    "1h":  "hr",
+}
+
+
+def period_to_cmip_frequency(period):
+    """
+    Map a BISICLES filename period string (e.g. ``"1y"``) to a CMIP frequency
+    string (e.g. ``"yr"``).  Returns *period* unchanged if not recognised.
+    """
+    return _PERIOD_TO_CMIP_FREQUENCY.get(period, period)
+
 # UKESM-BISICLES domain origins (lower-left corner of the model grid, metres).
 # These are the x0/y0 values passed to the flatten file tool for each ice sheet.
 UKESM_GRID_ORIGINS = {
@@ -35,6 +54,8 @@ def get_global_attributes(
     grid="",
     nominal_resolution="",
     source_files=None,
+    realm="landIce",
+    frequency="",
     **kwargs,
 ):
     """
@@ -74,23 +95,28 @@ def get_global_attributes(
 
     attrs = {
         "Conventions": CF_CONVENTIONS,
+        "creation_date": now,
         "source": source,
         "history": history,
         "institution": institution,
         "experiment": experiment,
         "variant_label": variant_label,
         "ice_sheet": ice_sheet,
+        "realm": realm,
+        "frequency": frequency,
         "references": references,
         "grid_label": grid_label,
         "grid": grid,
         "nominal_resolution": nominal_resolution,
     }
     if source_files:
-        attrs["source_file"] = " ".join(source_files) if isinstance(source_files, list) else source_files
+        attrs["source_file"] = (
+            " ".join(source_files) if isinstance(source_files, list) else source_files
+        )
     # Add any extra kwargs
     attrs.update(kwargs)
     # Remove empty strings to keep the output clean
-    return {k: v for k, v in attrs.items() if v != ""}
+    return {k: v for k, v in attrs.items() if v not in ("", None)}
 
 
 _DAYS_PER_YEAR = {
@@ -301,8 +327,6 @@ def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="g
         CF calendar name: ``"gregorian"`` (default) or ``"360_day"``.
         Must match the calendar used when the ``time`` variable was created.
     """
-    import numpy as np
-
     start_days, _, _ = years_to_days(np.asarray(start_years, dtype=float), reference_year, calendar)
     end_days, _, _ = years_to_days(np.asarray(end_years, dtype=float), reference_year, calendar)
 
@@ -428,14 +452,14 @@ def compute_latlon_arrays(x, y, epsg_code):
     """
     try:
         from pyproj import Transformer
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "pyproj is required to compute lat/lon coordinate arrays. "
             "Install it with:\n"
             "    pip install pyproj\n"
             "or:\n"
             "    pip install 'bisicles-cmip7-postproc[geo]'"
-        )
+        ) from exc
     transformer = Transformer.from_crs(
         f"EPSG:{epsg_code}", "EPSG:4326", always_xy=True
     )

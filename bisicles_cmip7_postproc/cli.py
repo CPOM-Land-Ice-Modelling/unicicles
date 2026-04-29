@@ -76,6 +76,13 @@ def _add_metadata_args(parser):
         help="Ice sheet identifier (e.g. GrIS, AIS).",
     )
     grp.add_argument(
+        "--frequency", default="", dest="frequency",
+        help=(
+            "CMIP output frequency string (e.g. 'yr', 'mon', 'day'). "
+            "Auto-detected from the filename period field when not set."
+        ),
+    )
+    grp.add_argument(
         "--reference-year", type=int, default=1850, dest="reference_year",
         help="Reference year for the CF time axis (default: 1850).",
     )
@@ -192,6 +199,7 @@ def run_diagnostics_cli(args=None):
         experiment=ns.experiment,
         variant_label=ns.variant_label,
         ice_sheet=ns.ice_sheet,
+        frequency=ns.frequency,
     )
 
     input_path = Path(ns.input)
@@ -378,6 +386,7 @@ def run_flatten_cli(args=None):
         experiment=ns.experiment,
         variant_label=ns.variant_label,
         ice_sheet=ns.ice_sheet,
+        frequency=ns.frequency,
     )
 
     input_path = Path(ns.input)

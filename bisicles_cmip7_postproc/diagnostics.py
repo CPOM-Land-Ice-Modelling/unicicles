@@ -33,6 +33,7 @@ from .cmip7_vars import SCALAR_MAPPING, ICE_DENSITY, SECS_PER_YEAR
 from .cf_utils import (
     FILL_VALUE,
     get_global_attributes,
+    period_to_cmip_frequency,
     add_time_variable,
     add_time_bounds,
 )
@@ -297,6 +298,7 @@ def write_diagnostics_netcdf(
     variant_label="",
     extra_attrs=None,
     filename_to_info=None,
+    frequency="",
 ):
     """
     Write one CF-compliant scalar timeseries NetCDF per variable from parsed
@@ -355,6 +357,11 @@ def write_diagnostics_netcdf(
             "SCALAR_MAPPING covers the desired (region, quantity) pairs."
         )
 
+    if not frequency and filename_to_info:
+        first_info = next(iter(filename_to_info.values()))
+        if first_info.period:
+            frequency = period_to_cmip_frequency(first_info.period)
+
     global_attrs = get_global_attributes(
         institution=institution,
         source=source,
@@ -362,6 +369,7 @@ def write_diagnostics_netcdf(
         variant_label=variant_label,
         ice_sheet=ice_sheet,
         source_files=next(iter(filename_to_info.values())).filename_pattern if filename_to_info else None,
+        frequency=frequency,
     )
     if extra_attrs:
         global_attrs.update(extra_attrs)
@@ -398,6 +406,8 @@ def write_diagnostics_netcdf(
 
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             ds.setncatts(global_attrs)
+            ds.variable_id = cname
+            ds.variable_name = cname
             ds.title = f"UniCiCles (BISICLES) output from UKESM: {m['long_name']}"
 
             # Time dimension and variable
