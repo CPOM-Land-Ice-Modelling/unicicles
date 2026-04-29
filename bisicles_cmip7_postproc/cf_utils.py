@@ -175,20 +175,10 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
             "false_northing": 0.0,
             "semi_major_axis": 6378137.0,
             "inverse_flattening": 298.257223563,
+            "reference_ellipsoid_name": "WGS84",
+            "horizontal_datum_name": "World Geodetic System 1984",
+            "prime_meridian_name": "Greenwich",
             "crs_wkt": (
-                'PROJCS["WGS 84 / Antarctic Polar Stereographic",'
-                'GEOGCS["WGS 84",DATUM["WGS_1984",'
-                'SPHEROID["WGS 84",6378137,298.257223563]],'
-                'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
-                'PROJECTION["Polar_Stereographic"],'
-                'PARAMETER["latitude_of_origin",-71],'
-                'PARAMETER["central_meridian",0],'
-                'PARAMETER["false_easting",0],'
-                'PARAMETER["false_northing",0],'
-                'UNIT["metre",1]]'
-            ),
-            # spatial_ref duplicates crs_wkt for GDAL/OGR compatibility
-            "spatial_ref": (
                 'PROJCS["WGS 84 / Antarctic Polar Stereographic",'
                 'GEOGCS["WGS 84",DATUM["WGS_1984",'
                 'SPHEROID["WGS 84",6378137,298.257223563]],'
@@ -217,20 +207,10 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
             "false_northing": 0.0,
             "semi_major_axis": 6378137.0,
             "inverse_flattening": 298.257223563,
+            "reference_ellipsoid_name": "WGS84",
+            "horizontal_datum_name": "World Geodetic System 1984",
+            "prime_meridian_name": "Greenwich",
             "crs_wkt": (
-                'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",'
-                'GEOGCS["WGS 84",DATUM["WGS_1984",'
-                'SPHEROID["WGS 84",6378137,298.257223563]],'
-                'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
-                'PROJECTION["Polar_Stereographic"],'
-                'PARAMETER["latitude_of_origin",70],'
-                'PARAMETER["central_meridian",-45],'
-                'PARAMETER["false_easting",0],'
-                'PARAMETER["false_northing",0],'
-                'UNIT["metre",1]]'
-            ),
-            # spatial_ref duplicates crs_wkt for GDAL/OGR compatibility
-            "spatial_ref": (
                 'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",'
                 'GEOGCS["WGS 84",DATUM["WGS_1984",'
                 'SPHEROID["WGS 84",6378137,298.257223563]],'
