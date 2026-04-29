@@ -37,7 +37,7 @@ Two main workflows are provided:
         # Single file
         process_plotfile(
             "plot.000100.2d.hdf5",
-            "plot.000100_cmip7.nc",
+            "plot.000100.nc",
             level=2,
             epsg_code=3413,
             ice_sheet="GrIS",

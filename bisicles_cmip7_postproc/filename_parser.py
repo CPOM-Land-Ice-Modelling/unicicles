@@ -174,6 +174,26 @@ class BISICLESFileInfo:
         """
         return "time: mean" if self.is_time_mean else "time: point"
 
+    @property
+    def filename_pattern(self) -> str:
+        """
+        Filename pattern for this file series with date fields replaced by
+        YYYYMMDD placeholders, e.g.
+        ``bisicles_dx030c_1y_YYYYMMDD-YYYYMMDD_plot-AIS.hdf5``.
+        """
+        if not self.period:  # old format
+            return f"bisicles_{self.suite_id}_YYYYMMDD_plot-{self.ice_sheet}.hdf5"
+        elif self.is_time_mean:
+            return (
+                f"bisicles_{self.suite_id}_{self.period}_YYYYMMDD-YYYYMMDD"
+                f"_plot.CF-{self.ice_sheet}.hdf5"
+            )
+        else:
+            return (
+                f"bisicles_{self.suite_id}_{self.period}_YYYYMMDD-YYYYMMDD"
+                f"_plot-{self.ice_sheet}.hdf5"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Public parsing function

@@ -270,7 +270,7 @@ def _build_flatten_parser():
         help=(
             "Output directory for per-variable NetCDF files.  "
             "One file per CMIP7 variable is written into this directory, "
-            "named {cmip7_name}_cmip7.nc.  "
+            "named {cmip7_name}.nc.  "
             "Defaults to the same directory as the input file(s)."
         ),
     )

@@ -44,7 +44,7 @@ Output file organisation
 ------------------------
 Both :func:`process_plotfile` (single file) and :func:`process_directory`
 (directory of files) write **one output NetCDF per CMIP7 variable**, named
-``{cmip7_name}_cmip7.nc``, inside the specified ``output_dir``.  When
+``{cmip7_name}.nc``, inside the specified ``output_dir``.  When
 processing a directory the time axis of each file spans all input timesteps,
 giving a multi-year timeseries per variable.
 """
@@ -465,7 +465,7 @@ def write_cmip7_per_variable_netcdfs(
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
     flatten outputs.
 
-    Each output file is named ``{cmip7_name}_cmip7.nc`` inside *output_dir*
+    Each output file is named ``{cmip7_name}.nc`` inside *output_dir*
     and contains a single data variable with a ``time`` dimension spanning all
     supplied timesteps.
 
@@ -707,7 +707,7 @@ def write_cmip7_per_variable_netcdfs(
             continue
         arr_stack = np.stack(_sort(bisicles_arrays[bisicles_name]), axis=0)
         out_name = mapping["cmip7_name"]
-        out_path = output_dir / f"{out_name}_cmip7.nc"
+        out_path = output_dir / f"{out_name}.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.title = (
@@ -725,7 +725,7 @@ def write_cmip7_per_variable_netcdfs(
             continue
         arr_stack = np.stack(_sort(cf_arrays[cf_name]), axis=0)
         out_name = mapping["cmip7_name"]
-        out_path = output_dir / f"{out_name}_cmip7.nc"
+        out_path = output_dir / f"{out_name}.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.title = (
@@ -748,7 +748,7 @@ def write_cmip7_per_variable_netcdfs(
         cell_methods = dmeta["cell_methods"]
         if time_cell_method == "time: point":
             cell_methods = cell_methods.replace("time: mean", "time: point")
-        out_path = output_dir / f"{derived_name}_cmip7.nc"
+        out_path = output_dir / f"{derived_name}.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.title = (
@@ -781,7 +781,7 @@ def write_cmip7_per_variable_netcdfs(
             arr_stack = np.stack(_sort(arr_list), axis=0)
             arr_stack = np.where(np.isnan(arr_stack), FILL_VALUE, arr_stack)
             safe_name = bname.replace("/", "_")
-            out_path = output_dir / f"{safe_name}_cmip7.nc"
+            out_path = output_dir / f"{safe_name}.nc"
             with Dataset(str(out_path), "w", format="NETCDF4") as ds:
                 _setup_ds(ds)
                 ds.title = f"UniCiCles (BISICLES) output from UKESM: {bname}"
@@ -804,7 +804,7 @@ def write_cmip7_per_variable_netcdfs(
     cell_area = np.full((ny, nx_size), dx * dy, dtype=np.float64)
 
     for geom_name, gmeta in GRID_GEOMETRY_FIELDS.items():
-        out_path = output_dir / f"{geom_name}_cmip7.nc"
+        out_path = output_dir / f"{geom_name}.nc"
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             ds.setncatts(global_attrs)
             ds.title = f"UniCiCles (BISICLES) output from UKESM: {gmeta['long_name']}"
@@ -926,7 +926,7 @@ def process_plotfile(
     Flatten a BISICLES plot HDF5 file and write one CMIP7/CF-compliant NetCDF
     per variable into *output_dir*.
 
-    Each output file is named ``{cmip7_name}_cmip7.nc`` and contains a single
+    Each output file is named ``{cmip7_name}.nc`` and contains a single
     data variable with a time dimension of size 1 (the single input timestep).
 
     Parameters
@@ -1040,7 +1040,7 @@ def process_plotfile(
         ice_density=ice_density,
         water_density=water_density,
         h_min=h_min,
-        source_files=[plot_file.name],
+        source_files=file_info.filename_pattern if file_info is not None else plot_file.name,
         **nc_kwargs,
     )
 
@@ -1072,7 +1072,7 @@ def process_directory(
     Flatten all BISICLES plot files in a directory and write one CMIP7 NetCDF
     per variable, with all timesteps on a single time axis.
 
-    Each output file is named ``{cmip7_name}_cmip7.nc`` and its ``time``
+    Each output file is named ``{cmip7_name}.nc`` and its ``time``
     dimension spans all input plot files in chronological order.
 
     Parameters
@@ -1180,7 +1180,10 @@ def process_directory(
         ice_density=ice_density,
         water_density=water_density,
         h_min=h_min,
-        source_files=[pf.name for pf in plot_files],
+        source_files=next(
+            (fi.filename_pattern for _, fi in all_data if fi is not None),
+            plot_files[0].name if plot_files else None,
+        ),
         **nc_kwargs,
     )
 
