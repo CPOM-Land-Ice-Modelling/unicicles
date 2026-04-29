@@ -34,6 +34,7 @@ def get_global_attributes(
     grid_label="gn",
     grid="",
     nominal_resolution="",
+    source_files=None,
     **kwargs,
 ):
     """
@@ -84,6 +85,8 @@ def get_global_attributes(
         "grid": grid,
         "nominal_resolution": nominal_resolution,
     }
+    if source_files:
+        attrs["source_file"] = " ".join(source_files) if isinstance(source_files, list) else source_files
     # Add any extra kwargs
     attrs.update(kwargs)
     # Remove empty strings to keep the output clean

@@ -459,6 +459,7 @@ def write_cmip7_per_variable_netcdfs(
     variant_label="",
     ice_sheet="",
     extra_attrs=None,
+    source_files=None,
 ):
     """
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
@@ -660,6 +661,7 @@ def write_cmip7_per_variable_netcdfs(
         experiment=experiment,
         variant_label=variant_label,
         ice_sheet=ice_sheet,
+        source_files=source_files,
     )
     if extra_attrs:
         global_attrs.update(extra_attrs)
@@ -1038,6 +1040,7 @@ def process_plotfile(
         ice_density=ice_density,
         water_density=water_density,
         h_min=h_min,
+        source_files=[plot_file.name],
         **nc_kwargs,
     )
 
@@ -1177,6 +1180,7 @@ def process_directory(
         ice_density=ice_density,
         water_density=water_density,
         h_min=h_min,
+        source_files=[pf.name for pf in plot_files],
         **nc_kwargs,
     )
 

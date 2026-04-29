@@ -361,6 +361,7 @@ def write_diagnostics_netcdf(
         experiment=experiment,
         variant_label=variant_label,
         ice_sheet=ice_sheet,
+        source_files=list(filename_to_info.keys()) if filename_to_info else None,
     )
     if extra_attrs:
         global_attrs.update(extra_attrs)
