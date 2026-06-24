@@ -44,7 +44,7 @@ UKESM_GRID_ORIGINS = {
 
 def get_global_attributes(
     institution="",
-    source="BISICLES adaptive mesh refinement ice sheet model", # should this be UKESM?
+    source="BISICLES adaptive mesh refinement ice sheet model",
     experiment="",
     variant_label="",
     ice_sheet="",
@@ -56,6 +56,9 @@ def get_global_attributes(
     source_files=None,
     realm="landIce",
     frequency="",
+    conventions=CF_CONVENTIONS,
+    model_id="",
+    member_id="",
     **kwargs,
 ):
     """
@@ -85,6 +88,13 @@ def get_global_attributes(
         ``"Antarctic Polar Stereographic (EPSG:3031)"``.
     nominal_resolution : str
         Approximate grid spacing as a CMIP string, e.g. ``"5 km"``.
+    conventions : str
+        CF conventions string.  Defaults to ``"CF-1.12 CMIP-7.0"`` for
+        CMIP7-coupled runs; pass ``"CF-1.12"`` for standalone ISMIP7 output.
+    model_id : str
+        Model identifier written as a global attribute (ISMIP7 DRS).
+    member_id : str
+        Member identifier written as a global attribute (ISMIP7 DRS).
     **kwargs
         Any additional key-value pairs to include as global attributes.
     """
@@ -94,13 +104,15 @@ def get_global_attributes(
         history = f"{extra_history}; {history}"
 
     attrs = {
-        "Conventions": CF_CONVENTIONS,
+        "Conventions": conventions,
         "creation_date": now,
         "source": source,
         "history": history,
         "institution": institution,
         "experiment": experiment,
         "variant_label": variant_label,
+        "model_id": model_id,
+        "member_id": member_id,
         "ice_sheet": ice_sheet,
         "realm": realm,
         "frequency": frequency,
@@ -117,6 +129,34 @@ def get_global_attributes(
     attrs.update(kwargs)
     # Remove empty strings to keep the output clean
     return {k: v for k, v in attrs.items() if v not in ("", None)}
+
+
+def _ismip7_drs_filename(varname, ice_sheet, experiment, model_id, member_id,
+                         frequency, times_sorted, mask_no=0):
+    """
+    Return an ISMIP7 DRS-compliant output filename (without directory path).
+
+    Pattern (no mask):  ``{varname}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc``
+    Pattern (mask N):   ``{varname}_mask{N}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc``
+
+    ``startyr`` and ``endyr`` are integer years derived from *times_sorted*.
+    If *frequency* is empty, ``"yr"`` is used and a warning is emitted.
+    """
+    import warnings
+    freq = frequency or "yr"
+    if not frequency:
+        warnings.warn(
+            "ismip7_mode=True but frequency is not set; defaulting to 'yr'. "
+            "Pass --frequency (CLI) or set frequency: in the config to suppress this.",
+            stacklevel=3,
+        )
+    start_yr = int(min(times_sorted))
+    end_yr   = int(max(times_sorted))
+    mask_part = f"_mask{mask_no}" if mask_no else ""
+    return (
+        f"{varname}{mask_part}_{ice_sheet}_{experiment}_"
+        f"{model_id}_{member_id}_{freq}_{start_yr}-{end_yr}.nc"
+    )
 
 
 _DAYS_PER_YEAR = {

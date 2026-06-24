@@ -31,11 +31,13 @@ import numpy as np
 
 from .cmip7_vars import SCALAR_MAPPING, ICE_DENSITY, SECS_PER_YEAR
 from .cf_utils import (
+    CF_CONVENTIONS,
     FILL_VALUE,
     get_global_attributes,
     period_to_cmip_frequency,
     add_time_variable,
     add_time_bounds,
+    _ismip7_drs_filename,
 )
 from .filename_parser import parse_bisicles_filename
 
@@ -299,6 +301,9 @@ def write_diagnostics_netcdf(
     extra_attrs=None,
     filename_to_info=None,
     frequency="",
+    ismip7_mode=False,
+    model_id="",
+    member_id="",
 ):
     """
     Write one CF-compliant scalar timeseries NetCDF per variable from parsed
@@ -338,6 +343,13 @@ def write_diagnostics_netcdf(
         filenames rather than from the CSV ``time`` field (which is always 0
         in UKESM-coupled runs).  Time-mean files will have a ``time_bnds``
         variable to satisfy CF-1.12 requirements.
+    ismip7_mode : bool
+        If True, write ISMIP7-compliant output: DRS filenames, ``Conventions``
+        set to ``"CF-1.12"``, and ``model_id`` / ``member_id`` global attributes.
+    model_id : str
+        ISMIP7 model identifier used in the DRS filename and global attributes.
+    member_id : str
+        ISMIP7 member identifier used in the DRS filename and global attributes.
 
     Returns
     -------
@@ -370,6 +382,9 @@ def write_diagnostics_netcdf(
         ice_sheet=ice_sheet,
         source_files=next(iter(filename_to_info.values())).filename_pattern if filename_to_info else None,
         frequency=frequency,
+        conventions="CF-1.12" if ismip7_mode else CF_CONVENTIONS,
+        model_id=model_id,
+        member_id=member_id,
     )
     if extra_attrs:
         global_attrs.update(extra_attrs)
@@ -400,7 +415,13 @@ def write_diagnostics_netcdf(
 
         # File and variable name
         var_name = cname if mask_no == 0 else f"{cname}_mask{mask_no}"
-        out_path = output_dir / f"{var_name}.nc"
+        if ismip7_mode:
+            out_path = output_dir / _ismip7_drs_filename(
+                cname, ice_sheet, experiment, model_id, member_id,
+                frequency, time_arr, mask_no=mask_no,
+            )
+        else:
+            out_path = output_dir / f"{var_name}.nc"
 
         values = np.array([time_dict.get(t, np.nan) for t in times])
 
@@ -408,7 +429,7 @@ def write_diagnostics_netcdf(
             ds.setncatts(global_attrs)
             ds.variable_id = cname
             ds.variable_name = cname
-            ds.title = f"UniCiCles (BISICLES) output from UKESM: {m['long_name']}"
+            ds.title = m["long_name"] if ismip7_mode else f"UniCiCles (BISICLES) output from UKESM: {m['long_name']}"
 
             # Time dimension and variable
             ds.createDimension("time", len(times))

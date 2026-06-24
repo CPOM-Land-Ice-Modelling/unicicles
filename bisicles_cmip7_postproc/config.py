@@ -162,7 +162,8 @@ _FLATTEN_KEYS = {
     "verbose",
     # nc_kwargs (passed through to write_cmip7_per_variable_netcdfs)
     "institution", "source", "experiment", "variant_label", "ice_sheet",
-    "extra_attrs",
+    "extra_attrs", "frequency",
+    "ismip7_mode", "model_id", "member_id",
 }
 
 _DIAG_KEYS = {
@@ -173,11 +174,13 @@ _DIAG_KEYS = {
     "reference_year", "calendar", "verbose",
     # nc_kwargs
     "institution", "source", "experiment", "variant_label", "ice_sheet",
-    "extra_attrs",
+    "extra_attrs", "frequency",
+    "ismip7_mode", "model_id", "member_id",
 }
 
 _NC_KWARGS_KEYS = {"institution", "source", "experiment", "variant_label",
-                   "ice_sheet", "extra_attrs"}
+                   "ice_sheet", "extra_attrs", "frequency",
+                   "ismip7_mode", "model_id", "member_id"}
 
 
 def _normalise_flatten_cfg(cfg):
@@ -189,7 +192,7 @@ def _normalise_flatten_cfg(cfg):
         cfg.pop("epsg", None)
 
     # Ensure boolean flags
-    for key in ("cmip7_only", "keep_intermediate", "verbose"):
+    for key in ("cmip7_only", "keep_intermediate", "verbose", "ismip7_mode"):
         if key in cfg:
             cfg[key] = bool(cfg[key])
 
@@ -198,8 +201,9 @@ def _normalise_flatten_cfg(cfg):
 
 def _normalise_diag_cfg(cfg):
     """Normalise config dict keys to the canonical names expected by diagnostics."""
-    if "verbose" in cfg:
-        cfg["verbose"] = bool(cfg["verbose"])
+    for key in ("verbose", "ismip7_mode"):
+        if key in cfg:
+            cfg[key] = bool(cfg[key])
 
     return cfg
 

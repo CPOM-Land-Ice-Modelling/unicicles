@@ -513,6 +513,238 @@ def run_config_cli(args=None):
 
 
 # ---------------------------------------------------------------------------
+# ISMIP7 standalone: shared metadata args
+# ---------------------------------------------------------------------------
+
+def _add_ismip7_metadata_args(parser):
+    """Add ISMIP7 DRS metadata arguments (model-id, member-id)."""
+    grp = parser.add_argument_group("ISMIP7 DRS metadata")
+    grp.add_argument(
+        "--model-id", default="BISICLES", dest="model_id",
+        help=(
+            "ISMIP7 model identifier written in the DRS output filename and as "
+            "a global attribute (default: 'BISICLES')."
+        ),
+    )
+    grp.add_argument(
+        "--member-id", default="r1", dest="member_id",
+        help=(
+            "ISMIP7 member identifier written in the DRS output filename and as "
+            "a global attribute (default: 'r1')."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# bike-ismip7-postproc-diagnostics
+# ---------------------------------------------------------------------------
+
+def _build_ismip7_diagnostics_parser():
+    p = _build_diagnostics_parser()
+    p.prog = "bike-ismip7-postproc-diagnostics"
+    p.description = (
+        "Run BISICLES diagnostics on a standalone plot file or run directory and "
+        "write ISMIP7 DRS-named CF-compliant scalar timeseries NetCDF files."
+    )
+    _add_ismip7_metadata_args(p)
+    return p
+
+
+def run_ismip7_diagnostics_cli(args=None):
+    """Entry point for the ``bike-ismip7-postproc-diagnostics`` command."""
+    import sys as _sys
+    _raw = args if args is not None else _sys.argv[1:]
+    parser = _build_ismip7_diagnostics_parser()
+    if "--config" in _raw:
+        idx = _raw.index("--config")
+        _cfg_path = _raw[idx + 1]
+        from .config import load_config, _normalise_diag_cfg
+        _cfg = load_config(_cfg_path)
+        _cfg.pop("tool", None)
+        _normalise_diag_cfg(_cfg)
+        parser.set_defaults(**_cfg)
+    ns = parser.parse_args(args)
+
+    if ns.input is None:
+        parser.error("--input is required (or set 'input' in a --config file)")
+
+    from .diagnostics import process_single_file, process_directory
+
+    nc_kwargs = dict(
+        institution=ns.institution,
+        source=ns.source,
+        experiment=ns.experiment,
+        variant_label=ns.variant_label,
+        ice_sheet=ns.ice_sheet,
+        frequency=ns.frequency or "yr",
+        ismip7_mode=True,
+        model_id=ns.model_id,
+        member_id=ns.member_id,
+    )
+
+    input_path = Path(ns.input)
+    output_dir = ns.output_dir if ns.output_dir is not None else (
+        str(input_path) if input_path.is_dir() else str(input_path.parent)
+    )
+
+    if input_path.is_dir():
+        process_directory(
+            directory=input_path,
+            output_dir=output_dir,
+            exe_path=ns.exe_path,
+            plot_pattern=ns.plot_pattern,
+            ice_density=ns.ice_density,
+            water_density=ns.water_density,
+            gravity=ns.gravity,
+            h_min=ns.h_min,
+            mask_file=ns.mask_file,
+            mask_no_start=ns.mask_no_start,
+            mask_no_end=ns.mask_no_end,
+            reference_year=ns.reference_year,
+            calendar=ns.calendar,
+            verbose=not ns.quiet,
+            **nc_kwargs,
+        )
+    elif input_path.is_file():
+        process_single_file(
+            plot_file=input_path,
+            output_dir=output_dir,
+            exe_path=ns.exe_path,
+            ice_density=ns.ice_density,
+            water_density=ns.water_density,
+            gravity=ns.gravity,
+            h_min=ns.h_min,
+            mask_file=ns.mask_file,
+            mask_no_start=ns.mask_no_start,
+            mask_no_end=ns.mask_no_end,
+            reference_year=ns.reference_year,
+            calendar=ns.calendar,
+            **nc_kwargs,
+        )
+    else:
+        print(f"Error: {ns.input} is not a file or directory.", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# bike-ismip7-postproc-flatten
+# ---------------------------------------------------------------------------
+
+def _build_ismip7_flatten_parser():
+    p = _build_flatten_parser()
+    p.prog = "bike-ismip7-postproc-flatten"
+    p.description = (
+        "Flatten standalone BISICLES plot HDF5 file(s) onto a uniform grid and "
+        "write ISMIP7 DRS-named CF-compliant 2D spatial NetCDF files."
+    )
+    _add_ismip7_metadata_args(p)
+    return p
+
+
+def run_ismip7_flatten_cli(args=None):
+    """Entry point for the ``bike-ismip7-postproc-flatten`` command."""
+    import sys as _sys
+    _raw = args if args is not None else _sys.argv[1:]
+    parser = _build_ismip7_flatten_parser()
+    if "--config" in _raw:
+        idx = _raw.index("--config")
+        _cfg_path = _raw[idx + 1]
+        from .config import load_config, _normalise_flatten_cfg
+        _cfg = load_config(_cfg_path)
+        _cfg.pop("tool", None)
+        _normalise_flatten_cfg(_cfg)
+        parser.set_defaults(**_cfg)
+    ns = parser.parse_args(args)
+
+    if ns.input is None:
+        parser.error("--input is required (or set 'input' in a --config file)")
+
+    from .flatten import process_plotfile, process_directory
+
+    nc_kwargs = dict(
+        institution=ns.institution,
+        source=ns.source,
+        experiment=ns.experiment,
+        variant_label=ns.variant_label,
+        ice_sheet=ns.ice_sheet,
+        frequency=ns.frequency or "yr",
+        ismip7_mode=True,
+        model_id=ns.model_id,
+        member_id=ns.member_id,
+    )
+
+    input_path = Path(ns.input)
+    output_dir = ns.output_dir if ns.output_dir is not None else (
+        str(input_path) if input_path.is_dir() else str(input_path.parent)
+    )
+
+    if input_path.is_dir():
+        process_directory(
+            directory=input_path,
+            output_dir=output_dir,
+            plot_pattern=ns.plot_pattern,
+            exe_path=ns.exe_path,
+            level=ns.level,
+            epsg_code=ns.epsg_code,
+            x0=ns.x0,
+            y0=ns.y0,
+            reference_year=ns.reference_year,
+            calendar=ns.calendar,
+            cmip7_only=ns.cmip7_only,
+            ice_density=ns.ice_density,
+            water_density=ns.water_density,
+            h_min=ns.h_min,
+            verbose=not ns.quiet,
+            **nc_kwargs,
+        )
+    elif input_path.is_file():
+        process_plotfile(
+            plot_file=input_path,
+            output_dir=output_dir,
+            exe_path=ns.exe_path,
+            level=ns.level,
+            epsg_code=ns.epsg_code,
+            x0=ns.x0,
+            y0=ns.y0,
+            reference_year=ns.reference_year,
+            calendar=ns.calendar,
+            cmip7_only=ns.cmip7_only,
+            ice_density=ns.ice_density,
+            water_density=ns.water_density,
+            h_min=ns.h_min,
+            keep_intermediate=ns.keep_intermediate,
+            verbose=not ns.quiet,
+            **nc_kwargs,
+        )
+    else:
+        print(f"Error: {ns.input} is not a file or directory.", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# bike-ismip7-postproc-run: config-file entry point
+# ---------------------------------------------------------------------------
+
+def run_ismip7_config_cli(args=None):
+    """Entry point for the ``bike-ismip7-postproc-run`` command."""
+    parser = _build_run_parser()
+    parser.prog = "bike-ismip7-postproc-run"
+    parser.description = (
+        "Run a standalone BISICLES ISMIP7 post-processing workflow from a YAML "
+        "or JSON config file.  The config file must contain a 'tool' key set to "
+        "either 'flatten' or 'diagnostics'.  ISMIP7 DRS output naming is applied "
+        "automatically; set model_id and member_id in the config or use --set."
+    )
+    ns = parser.parse_args(args)
+
+    overrides = {k: _cast_override(v) for k, v in ns.set}
+    overrides["ismip7_mode"] = True  # always force ISMIP7 mode from this entry point
+
+    from .config import run_from_config
+    run_from_config(ns.config, overrides=overrides)
+
+
+# ---------------------------------------------------------------------------
 # Script entry points
 # ---------------------------------------------------------------------------
 
@@ -526,6 +758,18 @@ def main_flatten():
 
 def main_run():
     run_config_cli()
+
+
+def main_ismip7_diagnostics():
+    run_ismip7_diagnostics_cli()
+
+
+def main_ismip7_flatten():
+    run_ismip7_flatten_cli()
+
+
+def main_ismip7_run():
+    run_ismip7_config_cli()
 
 
 if __name__ == "__main__":

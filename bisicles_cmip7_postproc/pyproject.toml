@@ -17,9 +17,12 @@ yaml = ["pyyaml"]   # recommended for YAML config files; JSON works without it
 geo  = ["pyproj"]   # required for 2-D lat/lon auxiliary coordinates (CF/CMOR compliance)
 
 [project.scripts]
-bike-cmip7-postproc-diagnostics = "bisicles_cmip7_postproc.cli:main_diagnostics"
-bike-cmip7-postproc-flatten     = "bisicles_cmip7_postproc.cli:main_flatten"
-bike-cmip7-postproc-run         = "bisicles_cmip7_postproc.cli:main_run"
+bike-cmip7-postproc-diagnostics  = "bisicles_cmip7_postproc.cli:main_diagnostics"
+bike-cmip7-postproc-flatten      = "bisicles_cmip7_postproc.cli:main_flatten"
+bike-cmip7-postproc-run          = "bisicles_cmip7_postproc.cli:main_run"
+bike-ismip7-postproc-diagnostics = "bisicles_cmip7_postproc.cli:main_ismip7_diagnostics"
+bike-ismip7-postproc-flatten     = "bisicles_cmip7_postproc.cli:main_ismip7_flatten"
+bike-ismip7-postproc-run         = "bisicles_cmip7_postproc.cli:main_ismip7_run"
 
 [tool.setuptools.packages.find]
 where = [".."]

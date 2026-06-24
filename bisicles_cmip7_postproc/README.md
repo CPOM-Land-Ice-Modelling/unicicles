@@ -278,6 +278,97 @@ Each output NetCDF file contains:
   `variant_label`, `ice_sheet`, and `source_file` (the basename(s) of the
   input HDF5 file(s) that produced this output).
 
+## Standalone BISICLES / ISMIP7
+
+Three additional commands are provided for postprocessing **standalone** BISICLES
+simulations (not coupled to UKESM) and producing ISMIP7-compliant output:
+
+  bike-ismip7-postproc-flatten
+  bike-ismip7-postproc-diagnostics
+  bike-ismip7-postproc-run
+
+The key differences from the CMIP7-coupled workflow are:
+
+- **Output filenames** follow the ISMIP7 DRS convention:
+  `{varname}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc`
+  e.g. `lithk_AIS_ctrl_proj_BISICLES_r1_yr_2015-2100.nc`
+- **`Conventions`** global attribute is set to `"CF-1.12"` (not `"CF-1.12 CMIP-7.0"`).
+- **`model_id`** and **`member_id`** are written as global attributes.
+- **Simulation time** is read directly from the BISICLES HDF5 internal time
+  counter (not from the filename), which is the authoritative source for
+  standalone runs.
+- **Calendar** defaults to `gregorian` (365.25 days/year).
+- **Variable names and metadata** are identical to the CMIP7 workflow.
+
+### ISMIP7 flatten example
+
+```bash
+bike-ismip7-postproc-flatten \
+    --input  /data/standalone/output/ \
+    --output-dir /data/postproc/ \
+    --exe-path /opt/bisicles/flatten2d.Linux.64.g++.gfortran.OPT.ex \
+    --epsg 3031 \
+    --level 0 \
+    --ice-sheet AIS \
+    --experiment ctrl_proj \
+    --model-id BISICLES \
+    --member-id r1 \
+    --frequency yr \
+    --reference-year 1950
+```
+
+### ISMIP7 diagnostics example
+
+```bash
+bike-ismip7-postproc-diagnostics \
+    --input  /data/standalone/output/ \
+    --output-dir /data/postproc/ \
+    --exe-path /opt/bisicles/diagnostics2d.Linux.64.g++.gfortran.OPT.ex \
+    --ice-sheet AIS \
+    --experiment ctrl_proj \
+    --model-id BISICLES \
+    --member-id r1 \
+    --frequency yr \
+    --reference-year 1950
+```
+
+### ISMIP7 config file
+
+Config template files are in the `config/` directory:
+
+  config/ismip7_flatten_defaults.yaml      -- flatten workflow
+  config/ismip7_diagnostics_defaults.yaml  -- diagnostics workflow
+
+```bash
+bike-ismip7-postproc-run my_ismip7_flatten.yaml
+```
+
+The config file uses `tool: flatten` or `tool: diagnostics` as usual; the
+`bike-ismip7-postproc-run` command automatically sets `ismip7_mode: true`.
+The ISMIP7 mode can also be enabled explicitly in any config file by adding
+`ismip7_mode: true`, which then works with `bike-cmip7-postproc-run` too.
+
+### New CLI options (ISMIP7 commands only)
+
+**--model-id** / `model_id`  [default: "BISICLES"]
+    ISMIP7 model identifier written in the DRS filename and as a global attribute.
+
+**--member-id** / `member_id`  [default: "r1"]
+    ISMIP7 member identifier written in the DRS filename and as a global attribute.
+
+### ISMIP7 DRS filename components
+
+| Component  | Source                        | Example        |
+|------------|-------------------------------|----------------|
+| varname    | CMIP7/ISMIP7 variable name    | `lithk`        |
+| icesheet   | `--ice-sheet`                 | `AIS`          |
+| exp        | `--experiment`                | `ctrl_proj`    |
+| model      | `--model-id`                  | `BISICLES`     |
+| member     | `--member-id`                 | `r1`           |
+| freq       | `--frequency` (default `yr`)  | `yr`           |
+| startyr    | Minimum year in time axis     | `2015`         |
+| endyr      | Maximum year in time axis     | `2100`         |
+
 ## UKESM-specific notes
 
 - Always use `--calendar 360_day` for UKESM-coupled runs. BISICLES internal

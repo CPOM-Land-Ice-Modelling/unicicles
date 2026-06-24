@@ -67,6 +67,7 @@ from .cmip7_vars import (
     OPEN_LAND_MASK_VAL,
 )
 from .cf_utils import (
+    CF_CONVENTIONS,
     FILL_VALUE,
     UKESM_GRID_ORIGINS,
     get_global_attributes,
@@ -77,6 +78,7 @@ from .cf_utils import (
     add_crs_variable,
     compute_latlon_arrays,
     add_latlon_variables,
+    _ismip7_drs_filename,
 )
 from .filename_parser import parse_bisicles_filename
 
@@ -462,6 +464,9 @@ def write_cmip7_per_variable_netcdfs(
     extra_attrs=None,
     source_files=None,
     frequency="",
+    ismip7_mode=False,
+    model_id="",
+    member_id="",
 ):
     """
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
@@ -513,6 +518,15 @@ def write_cmip7_per_variable_netcdfs(
         Ice sheet identifier (e.g. ``'GrIS'``, ``'AIS'``).
     extra_attrs : dict, optional
         Additional global attributes.
+    ismip7_mode : bool
+        If True, write ISMIP7-compliant output: DRS filenames, ``Conventions``
+        set to ``"CF-1.12"``, and ``model_id`` / ``member_id`` global attributes.
+    model_id : str
+        ISMIP7 model identifier used in the DRS filename and global attributes
+        (e.g. ``'BISICLES'``).  Only relevant when *ismip7_mode* is True.
+    member_id : str
+        ISMIP7 member identifier used in the DRS filename and global attributes
+        (e.g. ``'r1'``).  Only relevant when *ismip7_mode* is True.
 
     Returns
     -------
@@ -670,6 +684,9 @@ def write_cmip7_per_variable_netcdfs(
         ice_sheet=ice_sheet,
         source_files=source_files,
         frequency=frequency,
+        conventions="CF-1.12" if ismip7_mode else CF_CONVENTIONS,
+        model_id=model_id,
+        member_id=member_id,
     )
     global_attrs["external_variables"] = "modelcellareai"
     if extra_attrs:
@@ -704,6 +721,23 @@ def write_cmip7_per_variable_netcdfs(
         if has_latlon:
             add_latlon_variables(ds, lat_2d, lon_2d)
 
+    def _title(long_name):
+        """Return the NetCDF title attribute for a variable."""
+        if ismip7_mode:
+            return long_name
+        return f"UniCiCles (BISICLES) output from UKESM: {long_name}"
+
+    def _out_path(varname, mask_no=0):
+        """Return the output Path for a variable."""
+        if ismip7_mode:
+            fname = _ismip7_drs_filename(
+                varname, ice_sheet, experiment, model_id, member_id,
+                frequency, times_sorted, mask_no=mask_no,
+            )
+        else:
+            fname = f"{varname}.nc"
+        return output_dir / fname
+
     output_files = []
 
     # -----------------------------------------------------------------------
@@ -716,15 +750,12 @@ def write_cmip7_per_variable_netcdfs(
             continue
         arr_stack = np.stack(_sort(bisicles_arrays[bisicles_name]), axis=0)
         out_name = mapping["cmip7_name"]
-        out_path = output_dir / f"{out_name}.nc"
+        out_path = _out_path(out_name)
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.variable_id = out_name
             ds.variable_name = out_name
-            ds.title = (
-                f"UniCiCles (BISICLES) output from UKESM: "
-                f"{mapping['long_name']}"
-            )
+            ds.title = _title(mapping["long_name"])
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
                           grid_mapping, bisicles_name=bisicles_name,
                           coordinates=coords_str)
@@ -736,15 +767,12 @@ def write_cmip7_per_variable_netcdfs(
             continue
         arr_stack = np.stack(_sort(cf_arrays[cf_name]), axis=0)
         out_name = mapping["cmip7_name"]
-        out_path = output_dir / f"{out_name}.nc"
+        out_path = _out_path(out_name)
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.variable_id = out_name
             ds.variable_name = out_name
-            ds.title = (
-                f"UniCiCles (BISICLES) output from UKESM: "
-                f"{mapping['long_name']}"
-            )
+            ds.title = _title(mapping["long_name"])
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
                           grid_mapping, coordinates=coords_str)
         output_files.append(out_path)
@@ -761,15 +789,12 @@ def write_cmip7_per_variable_netcdfs(
         cell_methods = dmeta["cell_methods"]
         if time_cell_method == "time: point":
             cell_methods = cell_methods.replace("time: mean", "time: point")
-        out_path = output_dir / f"{derived_name}.nc"
+        out_path = _out_path(derived_name)
         with Dataset(str(out_path), "w", format="NETCDF4") as ds:
             _setup_ds(ds)
             ds.variable_id = derived_name
             ds.variable_name = derived_name
-            ds.title = (
-                f"UniCiCles (BISICLES) output from UKESM: "
-                f"{dmeta['long_name']}"
-            )
+            ds.title = _title(dmeta["long_name"])
             var = ds.createVariable(
                 derived_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
             )
@@ -801,7 +826,7 @@ def write_cmip7_per_variable_netcdfs(
                 _setup_ds(ds)
                 ds.variable_id = safe_name
                 ds.variable_name = safe_name
-                ds.title = f"UniCiCles (BISICLES) output from UKESM: {bname}"
+                ds.title = _title(bname)
                 var = ds.createVariable(
                     safe_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
                 )
@@ -826,7 +851,7 @@ def write_cmip7_per_variable_netcdfs(
             ds.setncatts(global_attrs)
             ds.variable_id = geom_name
             ds.variable_name = geom_name
-            ds.title = f"UniCiCles (BISICLES) output from UKESM: {gmeta['long_name']}"
+            ds.title = _title(gmeta["long_name"])
             ds.createDimension("y", ny)
             ds.createDimension("x", nx_size)
             add_xy_variables(ds, x, y, epsg_code=epsg)
