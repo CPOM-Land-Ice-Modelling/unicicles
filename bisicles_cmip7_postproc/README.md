@@ -27,13 +27,18 @@ pip install -e bisicles_cmip7_postproc/
 
 # With optional extras (recommended)
 pip install -e "bisicles_cmip7_postproc/[yaml,geo]"
+
+# With regridding support (needed for --x-min/--x-max/etc.)
+pip install -e "bisicles_cmip7_postproc/[yaml,geo,regrid]"
 ```
 
 Optional extras:
 
-  yaml  -- adds pyyaml; needed for YAML config files (JSON works without it)
-  geo   -- adds pyproj; needed for 2-D lat/lon coordinates (required for full
-           CF/CMOR compliance)
+  yaml   -- adds pyyaml; needed for YAML config files (JSON works without it)
+  geo    -- adds pyproj; needed for 2-D lat/lon coordinates (required for full
+            CF/CMOR compliance)
+  regrid -- adds scipy; needed for regridding onto a target grid
+            (--x-min/--x-max/--nx/--y-min/--y-max/--ny)
 
 ## Prerequisites
 
@@ -219,6 +224,28 @@ extra_attrs:
     ISMIP7, a separate regridding step is needed after running this tool — do
     not simply pass the ISMIP7 standard origins here unless your BISICLES run
     was configured to use them.
+
+**--x-min** / `x_min`, **--x-max** / `x_max`, **--nx** / `nx`  [default: null]
+**--y-min** / `y_min`, **--y-max** / `y_max`, **--ny** / `ny`  [default: null]
+    Regrid output onto a regular nx × ny grid spanning x_min..x_max and
+    y_min..y_max (in the same projection as `--epsg`).  All six must be
+    supplied together, or none at all.  Requires `scipy` (`pip install
+    "bisicles_cmip7_postproc[regrid]"`).
+
+    When not set, output is written on the standard BISICLES grid (no
+    regridding).  To produce output on the ISMIP7 standard grid, pass the
+    ISMIP7 grid parameters here — this is the recommended approach rather
+    than running a separate regridding step:
+
+    ```text
+    Domain  EPSG   x_min         x_max        nx    y_min         y_max        ny
+    ------  ----   -----------   ----------   ---   -----------   ----------   ---
+    AIS     3031   -3040000.0    3040000.0    761   -3040000.0    3040000.0    761
+    GrIS    3413   -720000.0     960000.0     1681  -3450000.0    -570000.0    2881
+    ```
+
+    Note: GrIS parameters should be verified against ISMIP7 documentation
+    before use.
 
 **--cmip7-only** / `cmip7_only`  [default: false]
     Only write CMIP7-standard variables. When false, unmapped BISICLES
@@ -454,21 +481,23 @@ AIS        3031   -3072000.0              -3072000.0
 These are the default values used when `--x0`/`--y0` are not supplied, so in
 most cases you do not need to pass them explicitly.
 
-**The output from this tool will therefore be on the standard BISICLES grid,
-not the ISMIP7 standard grid.** A separate regridding step is required to interpolate
-the data onto the ISMIP7 standard grid before submission. The ISMIP7 standard
-grid origins are:
+**To submit to ISMIP7, the output must be on the ISMIP7 standard grid**, which
+has different origins and resolution from the standard BISICLES grid. You can
+regrid onto the ISMIP7 standard grid directly within this tool using the
+`--x-min`/`--x-max`/`--nx`/`--y-min`/`--y-max`/`--ny` arguments (requires
+`scipy`):
 
 ```text
-Ice sheet  EPSG   x0 (ISMIP7 standard)  y0 (ISMIP7 standard)
----------  ----   --------------------  --------------------
-GrIS       3413   -720000.0             -3450000.0
-AIS        3031   -3040000.0            -3040000.0
+Domain  EPSG   x_min         x_max        nx    y_min         y_max        ny
+------  ----   -----------   ----------   ---   -----------   ----------   ---
+AIS     3031   -3040000.0    3040000.0    761   -3040000.0    3040000.0    761
+GrIS    3413   -720000.0     960000.0     1681  -3450000.0    -570000.0    2881
 ```
 
-Do not pass the ISMIP7 standard origins to `--x0`/`--y0` unless your BISICLES
-simulation was actually configured to run on that grid — doing so would shift
-all data to the wrong geographic location.
+Do **not** pass the ISMIP7 standard origins to `--x0`/`--y0` — those parameters
+control the input grid origin (which must match your BISICLES run), not the
+output grid. Using the wrong origin there would shift all data to the wrong
+geographic location.
 
 ## UKESM-specific notes
 

@@ -224,6 +224,38 @@ def compute_flotation_mask(
     return mask
 
 
+
+def _regrid(flat_data, xygrid):
+    """
+    Interpolate flat_data fields from the grid defined by flat_data['x'],
+    flat_data['y'] to the grid defined by x, y = xygrid.
+
+    Points on the target grid that fall outside the source domain are filled
+    with NaN; the caller is responsible for replacing these with a fill value.
+    """
+
+    from scipy.interpolate import RegularGridInterpolator
+
+    result = {}
+    result["x"], result["y"] = xygrid
+    result["time"] = flat_data["time"]
+    result["time_units"] = flat_data["time_units"]
+    result["epsg"] = flat_data["epsg"]
+    result["variables"] = {}
+    xy = np.meshgrid(result["y"], result["x"])
+
+    for key, var in flat_data["variables"].items():
+        rg = RegularGridInterpolator(
+            (flat_data["y"], flat_data["x"]),
+            var,
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+        result["variables"][key] = rg(xy).T
+
+    return result
+    
+
 # ---------------------------------------------------------------------------
 # Reading the flatten tool output and applying CMIP7 conversions
 # ---------------------------------------------------------------------------
@@ -483,6 +515,7 @@ def write_cmip7_per_variable_netcdfs(
     group="",
     contact_name="",
     contact_email="",
+    grid_spec=None,
 ):
     """
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
@@ -719,6 +752,35 @@ def write_cmip7_per_variable_netcdfs(
     _group = group or source_id
     _crs_str = f"epsg:{epsg}" if (ismip7_mode and epsg is not None) else ""
 
+    # Derive human-readable grid description and nominal resolution from x/y spacing
+    _dx = abs(float(x[1] - x[0])) if len(x) > 1 else 0.0
+    _dy = abs(float(y[1] - y[0])) if len(y) > 1 else 0.0
+    _res_m = max(_dx, _dy)
+    if _res_m >= 1000.0:
+        _res_str = f"{_res_m / 1000:.4g} km"
+    else:
+        _res_str = f"{_res_m:.4g} m"
+
+    _epsg_names = {
+        3031: "Antarctic Polar Stereographic",
+        3413: "NSIDC Sea Ice Polar Stereographic North",
+    }
+    _proj_name = _epsg_names.get(epsg, f"EPSG:{epsg}") if epsg is not None else "unknown projection"
+    _grid_desc = f"{_proj_name} (EPSG:{epsg}), {_res_str}" if epsg is not None else ""
+
+    # Build regrid provenance metadata when a target grid was supplied
+    _extra_history = ""
+    _grid_label = "gn"
+    if grid_spec is not None:
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        _extra_history = (
+            f"Regridded to x=[{x_min},{x_max}] nx={nx}, "
+            f"y=[{y_min},{y_max}] ny={ny} "
+            f"using scipy.interpolate.RegularGridInterpolator (linear)"
+        )
+        if not ismip7_mode:
+            _grid_label = "gr"
+
     global_attrs = get_global_attributes(
         institution=institution,
         source=source,
@@ -734,6 +796,10 @@ def write_cmip7_per_variable_netcdfs(
         contact_name=contact_name,
         contact_email=contact_email,
         crs=_crs_str,
+        extra_history=_extra_history,
+        grid_label=_grid_label,
+        grid=_grid_desc,
+        nominal_resolution=_res_str,
     )
     if ismip7_mode and ism_id:
         global_attrs["model"] = ism_id
@@ -938,6 +1004,7 @@ def _flatten_plot_file(
     level=0,
     x0=None,
     y0=None,
+    xygrid=None,
     keep_intermediate=False,
     intermediate_nc=None,
     verbose=False,
@@ -990,6 +1057,8 @@ def _flatten_plot_file(
         if verbose:
             print(f"  Reading flattened data...")
         flatten_data = _read_flatten_nc(tmp_nc)
+        if xygrid is not None:
+            flatten_data = _regrid(flatten_data, xygrid) 
     finally:
         if _tmp_path is not None and _tmp_path.exists():
             os.unlink(_tmp_path)
@@ -1016,6 +1085,7 @@ def process_plotfile(
     water_density=1028.0,
     h_min=1.0,
     keep_intermediate=False,
+    grid_spec=None,
     verbose=True,
     **nc_kwargs,
 ):
@@ -1046,6 +1116,10 @@ def process_plotfile(
         Y-coordinate of the lower-left corner of the domain (metres).
         Defaults to the standard BISICLES value for the given ``epsg_code``
         (see :data:`cf_utils.UKESM_GRID_ORIGINS`).
+     grid_spec : tuple (x_min, x_max, nx, y_min, y_max, ny)
+        specify an output grid on different to the BISICLES grid but on the same
+        projection . This will be a regular nx by ny grid,
+        with x_min <= x <= x_max & similar for y
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1110,12 +1184,20 @@ def process_plotfile(
     if verbose:
         print(f"Flattening {plot_file.name} onto level {level}...")
 
+    xygrid = None
+    if grid_spec is not None:
+        print (f'output grid  x_min, x_max, nx, y_min, y_max, ny = {grid_spec}')
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        xygrid = np.linspace(x_min, x_max, nx), np.linspace(y_min, y_max, ny)
+
+        
     flatten_data, _ = _flatten_plot_file(
         plot_file,
         exe_path=exe_path,
         level=level,
         x0=x0,
         y0=y0,
+        xygrid=xygrid,
         keep_intermediate=keep_intermediate,
         intermediate_nc=intermediate_nc,
         verbose=verbose,
@@ -1139,6 +1221,7 @@ def process_plotfile(
         water_density=water_density,
         h_min=h_min,
         source_files=file_info.filename_pattern if file_info is not None else plot_file.name,
+        grid_spec=grid_spec,
         **nc_kwargs,
     )
 
@@ -1157,6 +1240,7 @@ def process_directory(
     epsg_code=None,
     x0=None,
     y0=None,
+    grid_spec=None,
     reference_year=1850,
     calendar="gregorian",
     cmip7_only=False,
@@ -1194,6 +1278,10 @@ def process_directory(
     y0 : float, optional
         Y-coordinate of the lower-left corner of the domain (metres).
         Defaults to the standard BISICLES value for the given ``epsg_code``.
+    grid_spec : tuple (x_min, x_max, nx, y_min, y_max, ny)
+        specify an output grid on different to the BISICLES grid but on the same
+        projection . This will be a regular nx by ny grid,
+        with x_min <= x <= x_max & similar for y
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1244,6 +1332,13 @@ def process_directory(
 
     # Collect flattened data from all plot files before writing
     all_data = []
+
+    xygrid = None
+    if grid_spec is not None:
+        print (f'output grid  x_min, x_max, nx, y_min, y_max, ny = {grid_spec}')
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        xygrid = np.linspace(x_min, x_max, nx), np.linspace(y_min, y_max, ny)
+
     for i, pf in enumerate(plot_files):
         if verbose:
             print(f"  [{i+1}/{len(plot_files)}] Flattening {pf.name}...")
@@ -1259,6 +1354,7 @@ def process_directory(
             level=level,
             x0=x0,
             y0=y0,
+            xygrid=xygrid,
             verbose=False,
         )
         all_data.append((flatten_data, file_info))
@@ -1282,6 +1378,7 @@ def process_directory(
             (fi.filename_pattern for _, fi in all_data if fi is not None),
             plot_files[0].name if plot_files else None,
         ),
+        grid_spec=grid_spec,
         **nc_kwargs,
     )
 

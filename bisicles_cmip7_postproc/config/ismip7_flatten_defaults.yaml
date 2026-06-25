@@ -114,6 +114,32 @@ frequency: yr
 
 
 # ---------------------------------------------------------------------------
+# Regridding (optional — requires scipy)
+# ---------------------------------------------------------------------------
+# If all six values below are set, regrid the output onto a regular nx × ny
+# grid spanning x_min..x_max and y_min..y_max (same projection as 'epsg').
+# This is the step needed to align BISICLES output (standard BISICLES grid)
+# with the ISMIP7 standard submission grid.
+#
+# ISMIP7 standard grid values:
+#   AIS (EPSG:3031) — 8 km, 761 × 761:
+#     x_min: -3040000.0   x_max: 3040000.0   nx: 761
+#     y_min: -3040000.0   y_max: 3040000.0   ny: 761
+#
+#   GrIS (EPSG:3413) — 1 km, 1681 × 2881 (verify before use):
+#     x_min: -720000.0    x_max: 960000.0    nx: 1681
+#     y_min: -3450000.0   y_max: -570000.0   ny: 2881
+#
+# Leave all as null to output on the standard BISICLES grid (no regridding).
+x_min: null
+x_max: null
+nx: null
+y_min: null
+y_max: null
+ny: null
+
+
+# ---------------------------------------------------------------------------
 # Flotation mask fallback
 # ---------------------------------------------------------------------------
 # Used when the plot file does not contain an explicit 'mask' or 'iceFrac'

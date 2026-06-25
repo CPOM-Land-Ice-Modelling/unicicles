@@ -95,6 +95,20 @@ frequency: null
 
 
 # ---------------------------------------------------------------------------
+# Regridding (optional — requires scipy)
+# ---------------------------------------------------------------------------
+# If all six values below are set, regrid the output onto a regular nx × ny
+# grid spanning x_min..x_max and y_min..y_max (same projection as 'epsg').
+# Leave all as null to output on the standard BISICLES grid (no regridding).
+x_min: null
+x_max: null
+nx: null
+y_min: null
+y_max: null
+ny: null
+
+
+# ---------------------------------------------------------------------------
 # Flotation mask fallback
 # ---------------------------------------------------------------------------
 # Used when the plot file does not contain an explicit 'mask' or 'iceFrac'
