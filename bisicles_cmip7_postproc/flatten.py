@@ -52,6 +52,7 @@ giving a multi-year timeseries per variable.
 import os
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +74,7 @@ from .cf_utils import (
     UKESM_GRID_ORIGINS,
     get_global_attributes,
     period_to_cmip_frequency,
+    exact_days_since,
     add_time_variable,
     add_time_bounds,
     add_xy_variables,
@@ -82,6 +84,10 @@ from .cf_utils import (
     _ismip7_drs_filename,
 )
 from .filename_parser import parse_bisicles_filename
+
+# Standalone BISICLES plot file patterns (no UKESM suite ID in the name)
+_RE_STANDALONE_CFMEAN   = re.compile(r'plot\.CF\.\d+\.2d\.hdf5$',  re.IGNORECASE)
+_RE_STANDALONE_SNAPSHOT = re.compile(r'plot\.\d+\.2d\.hdf5$',       re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +307,17 @@ def _read_flatten_nc(nc_path):
                 except ValueError:
                     pass
 
+        # Time bounds — read if the flatten tool wrote them (CF output files)
+        for _bnds_name in ("time_bnds", "time_bounds"):
+            if _bnds_name in ds.variables:
+                _bnds = np.asarray(ds.variables[_bnds_name][:]).ravel()
+                if len(_bnds) >= 2:
+                    result["time_start"] = float(_bnds[0])
+                    result["time_end"]   = float(_bnds[-1])
+                break
+
         # Data variables (skip coordinate/metadata variables)
-        skip = {"x", "y", "time", "crs", "level"}
+        skip = {"x", "y", "time", "time_bnds", "time_bounds", "crs", "level"}
         for name in ds.variables:
             if name in skip:
                 continue
@@ -643,11 +658,32 @@ def write_cmip7_per_variable_netcdfs(
             t_end = file_info.end_time_years
             tcm = file_info.cell_methods_time
         else:
-            t = flatten_data.get("time")
-            is_mean = False
-            t_start = None
-            t_end = None
-            tcm = "time: point"
+            t_raw = flatten_data.get("time") or 0.0
+            is_cf_mean = flatten_data.get("_is_cf_mean", False)
+            is_mean = is_cf_mean
+            if is_cf_mean:
+                # Use time bounds from the flatten NC if the flatten tool wrote them,
+                # otherwise infer the averaging period from the time value:
+                #   N.5  → mid-year convention: averaging year N, period [N, N+1]
+                #   N.0  → end-of-period convention: averaging year N-1, period [N-1, N]
+                if "time_start" in flatten_data and "time_end" in flatten_data:
+                    t_start = flatten_data["time_start"]
+                    t_end   = flatten_data["time_end"]
+                else:
+                    frac = t_raw - int(t_raw)
+                    if abs(frac - 0.5) < 0.1:
+                        year = int(t_raw)           # midpoint: 2015.5 → year 2015
+                    else:
+                        year = int(round(t_raw)) - 1  # end-of-period: 2016.0 → year 2015
+                    t_start = float(year)
+                    t_end   = float(year + 1)
+                t = 0.5 * (t_start + t_end)
+                tcm = "time: mean"
+            else:
+                t = t_raw
+                t_start = None
+                t_end = None
+                tcm = "time: point"
 
         times_list.append(t)
         is_time_mean_list.append(is_mean)
@@ -707,6 +743,46 @@ def write_cmip7_per_variable_netcdfs(
     time_cell_method = tcm_sorted[0] if tcm_sorted else "time: point"
     has_time_bounds = any(is_mean_sorted)
     time_arr = np.asarray(times_sorted)
+
+    # -----------------------------------------------------------------------
+    # Compute ISMIP7-correct time coordinates using exact calendar arithmetic:
+    #   Annual means  → timestamp = YYYY-07-01, bounds = [YYYY-01-01, (YYYY+1)-01-01]
+    #   Snapshots     → timestamp = YYYY-01-01 (integer year rounded)
+    # This avoids the ±1-3 day error in the 365.25-days/year approximation.
+    # -----------------------------------------------------------------------
+    _cal_key = "standard" if calendar == "gregorian" else calendar
+
+    def _to_exact_days(t, is_mean, t_start, t_end):
+        """Return (time_days, bound_start_days, bound_end_days) for one timestep."""
+        if is_mean and t_start is not None and t_end is not None:
+            s = round(t_start)
+            e = round(t_end)
+            if abs(t_start - s) < 0.01 and abs(t_end - e) < 0.01 and e - s == 1:
+                # Annual mean with integer Jan-1 boundaries → exact July-1 timestamp
+                return (
+                    exact_days_since(int(s), 7, 1, reference_year, _cal_key),
+                    exact_days_since(int(s), 1, 1, reference_year, _cal_key),
+                    exact_days_since(int(e), 1, 1, reference_year, _cal_key),
+                )
+        # Snapshot or non-annual mean → round to nearest integer year, use Jan-1
+        yr = int(round(t))
+        d = exact_days_since(yr, 1, 1, reference_year, _cal_key)
+        return d, d, d  # bounds ignored for snapshots
+
+    _exact_t  = []
+    _exact_bs = []
+    _exact_be = []
+    for _i in range(len(times_sorted)):
+        _td, _bs, _be = _to_exact_days(
+            times_sorted[_i], is_mean_sorted[_i],
+            t_start_sorted[_i], t_end_sorted[_i],
+        )
+        _exact_t.append(_td)
+        _exact_bs.append(_bs)
+        _exact_be.append(_be)
+    _exact_t  = np.array(_exact_t)
+    _exact_bs = np.array(_exact_bs) if has_time_bounds else None
+    _exact_be = np.array(_exact_be) if has_time_bounds else None
 
     def _sort(arr_list):
         """Return arr_list reordered by sort_idx."""
@@ -828,11 +904,14 @@ def write_cmip7_per_variable_netcdfs(
         ds.createDimension("x", nx_size)
         add_xy_variables(ds, x, y, epsg_code=epsg)
         add_time_variable(ds, time_arr, reference_year=reference_year,
-                          calendar=calendar, dtype=_time_dtype)
+                          calendar=calendar, dtype=_time_dtype,
+                          time_days=_exact_t)
         if has_time_bounds:
             add_time_bounds(ds, _tb_start, _tb_end,
                             reference_year=reference_year, calendar=calendar,
-                            dtype=_time_dtype)
+                            dtype=_time_dtype,
+                            start_days=_exact_bs,
+                            end_days=_exact_be)
         if epsg is not None:
             add_crs_variable(ds, epsg, x0=x0, y0=y0)
         if has_latlon:
@@ -1049,6 +1128,13 @@ def _flatten_plot_file(
 
     file_info = parse_bisicles_filename(plot_file)
 
+    # For standalone BISICLES files that don't match UKESM naming, detect
+    # whether this is a CF time-mean file (plot.CF.NNNNNN.2d.hdf5) or a
+    # snapshot (plot.NNNNNN.2d.hdf5) from the filename alone.
+    _standalone_cf = (
+        file_info is None and _RE_STANDALONE_CFMEAN.search(plot_file.name) is not None
+    )
+
     try:
         if verbose:
             print(f"  Flattening {plot_file.name} onto level {level}...")
@@ -1058,10 +1144,14 @@ def _flatten_plot_file(
             print(f"  Reading flattened data...")
         flatten_data = _read_flatten_nc(tmp_nc)
         if xygrid is not None:
-            flatten_data = _regrid(flatten_data, xygrid) 
+            flatten_data = _regrid(flatten_data, xygrid)
     finally:
         if _tmp_path is not None and _tmp_path.exists():
             os.unlink(_tmp_path)
+
+    # Store the CF-mean flag so write_cmip7_per_variable_netcdfs can set
+    # correct time encoding without needing to re-examine the filename.
+    flatten_data["_is_cf_mean"] = _standalone_cf
 
     return flatten_data, file_info
 
