@@ -1,0 +1,131 @@
+# bisicles_cmip7_postproc — diagnostics workflow config
+# ======================================================
+# Runs the BISICLES diagnostics tool on a plot file or directory of plot files
+# and writes a CF-compliant scalar timeseries NetCDF.
+#
+# Usage:
+#   bike-cmip7-postproc-run diagnostics_defaults.yaml
+#   bike-cmip7-postproc-diagnostics --config diagnostics_defaults.yaml
+#
+# Copy this file, set 'input', 'output_dir', and the CF metadata fields, then run.
+# Any option left as null will use the built-in default.
+
+tool: diagnostics
+
+
+# ---------------------------------------------------------------------------
+# Input / output
+# ---------------------------------------------------------------------------
+
+# Path to a BISICLES plot HDF5 file or a directory of plot files. [required]
+input: null
+
+# Output directory for per-variable CF NetCDF files.
+# One file per diagnostic variable is written, named {cmip7_name}.nc.
+# Defaults to the same directory as the input file(s) when left as null.
+output_dir: null
+
+# Glob pattern used to find plot files when 'input' is a directory.
+plot_pattern: "plot.*.2d.hdf5"
+
+# Print progress messages to stdout.
+verbose: true
+
+
+# ---------------------------------------------------------------------------
+# Executables
+# ---------------------------------------------------------------------------
+
+# Full path to the BISICLES diagnostics executable. REQUIRED.
+# Example: /path/to/bisicles-uob/code/filetools/diagnostics2d.Linux.64.g++.gfortran.OPT.ex
+exe_path: null
+
+
+# ---------------------------------------------------------------------------
+# Physical constants
+# ---------------------------------------------------------------------------
+
+# Ice density in kg m⁻³.
+ice_density: 918.0
+
+# Ocean water density in kg m⁻³.
+water_density: 1028.0
+
+# Gravitational acceleration in m s⁻².
+gravity: 9.81
+
+# Minimum ice thickness in metres below which a cell is excluded from
+# volume/mass diagnostics.
+h_min: 1.0
+
+
+# ---------------------------------------------------------------------------
+# Regional mask (optional)
+# ---------------------------------------------------------------------------
+# Provide an HDF5 mask file to split diagnostics into sub-regions (e.g.
+# individual drainage basins).  Leave mask_file as null for whole ice-sheet
+# diagnostics only.
+
+# Path to an HDF5 mask file.
+mask_file: null
+
+# First and last mask region index to process (inclusive).
+mask_no_start: 0
+mask_no_end: 0
+
+
+# ---------------------------------------------------------------------------
+# Time axis
+# ---------------------------------------------------------------------------
+
+# Reference year for the CF time axis (days since <reference_year>-01-01).
+reference_year: 1850
+
+# CF calendar used to convert simulation years to days.
+#   gregorian  — 365.25 days/year (BISICLES internal time)
+#   360_day    — 360 days/year (UKESM coupled runs)
+calendar: gregorian
+
+# CMIP output frequency string written to global attributes.
+# Auto-detected from the filename period field when left null.
+# Common values: yr, mon, day, 6hr, 3hr, hr
+frequency: null
+
+
+# ---------------------------------------------------------------------------
+# CF / CMIP7 global attributes
+# ---------------------------------------------------------------------------
+
+institution: ""
+source: "BISICLES adaptive mesh refinement ice sheet model"
+experiment: ""
+variant_label: ""
+
+# Ice sheet identifier written to global attributes.
+#   GrIS  — Greenland Ice Sheet
+#   AIS   — Antarctic Ice Sheet
+ice_sheet: ""
+
+# Additional global attributes as key-value pairs.
+# Use this for CMIP/project metadata that cannot be derived automatically.
+# Attributes written automatically: creation_date, variable_id, variable_name,
+#   frequency (from filename), realm (landIce), source_file (from filename).
+#
+# Example CMIP-style attributes:
+#   extra_attrs:
+#     activity_id: TerraFIRMA
+#     experiment_id: Up-8GtC
+#     institution_id: MOHC
+#     mip_era: CMIP7
+#     source_id: eUKESM1-1-ice-N96ORCA1
+#     source_type: AOGCM ISM
+#     mo_runid: u-cx209
+#     forcing_index: 1
+#     initialization_index: 1
+#     physics_index: 1
+#     realization_index: 1
+#     branch_method: "no parent"
+#     further_info_url: "none"
+#     product: model-output
+#     license: "Open Government License v3"
+extra_attrs: null

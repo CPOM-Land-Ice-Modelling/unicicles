@@ -1,0 +1,193 @@
+# bisicles_cmip7_postproc — ISMIP7 flatten workflow config
+# =========================================================
+# Flattens standalone BISICLES AMR HDF5 plot files onto a uniform grid
+# and writes ISMIP7 DRS-named CF-compliant 2D spatial NetCDF files.
+#
+# Output filenames follow the ISMIP7 DRS convention:
+#   {varname}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc
+# e.g.: lithk_AIS_BristolGlaciology_BISICLES_m001_standalone_f001_ctrl_proj_C001_2015-2100.nc
+#
+# Usage:
+#   bike-ismip7-postproc-run ismip7_flatten_defaults.yaml
+#   bike-ismip7-postproc-flatten --config ismip7_flatten_defaults.yaml
+#
+# Copy this file, fill in the required fields (marked [required]), and run.
+# Any option left as null will use the built-in default.
+
+tool: flatten
+
+# Enable ISMIP7 DRS output naming and CF-1.12 conventions.
+# Always set to true when using this template.
+ismip7_mode: true
+
+
+# ---------------------------------------------------------------------------
+# Input / output
+# ---------------------------------------------------------------------------
+
+# Path to a standalone BISICLES plot HDF5 file or a directory of plot files.
+# Standalone BISICLES produces files named plot.NNNNNN.2d.hdf5. [required]
+input: null
+
+# Output directory for per-variable ISMIP7 NetCDF files.
+# Defaults to the same directory as the input files if not set.
+output_dir: null
+
+# Glob pattern used to find plot files when 'input' is a directory.
+# Default matches standard standalone BISICLES output.
+plot_pattern: "plot.*.2d.hdf5"
+
+# Only write variables with ISMIP7/CMIP7 standard names.
+# When false, unmapped BISICLES fields are also written with their original names.
+cmip7_only: true
+
+# Keep the intermediate raw NetCDF written by the flatten executable
+# (single-file mode only; saved next to the output file as *_flatten_raw.nc).
+keep_intermediate: false
+
+# Print progress messages to stdout.
+verbose: true
+
+
+# ---------------------------------------------------------------------------
+# Executables
+# ---------------------------------------------------------------------------
+
+# Full path to the BISICLES flatten executable. [required]
+# Example: /path/to/bisicles-uob/code/filetools/flatten2d.Linux.64.g++.gfortran.OPT.ex
+exe_path: null
+
+
+# ---------------------------------------------------------------------------
+# Grid / projection
+# ---------------------------------------------------------------------------
+
+# EPSG code for the coordinate reference system. [required]
+#   3413  — NSIDC Sea Ice Polar Stereographic North (GrIS)
+#   3031  — Antarctic Polar Stereographic (AIS)
+epsg: null
+
+# AMR level to flatten onto (must be >= 0).
+#   0   = coarsest grid
+#   1,2 = successively finer levels
+level: 0
+
+# X/Y coordinates of the lower-left corner of the domain (metres).
+#
+# These must match the grid origin that was used when running BISICLES.
+# The coordinates in the output NetCDF file are set from these values, so
+# using incorrect origins will shift all data to the wrong physical location.
+#
+# Standard BISICLES grid origins (use these — all Bristol BISICLES runs use
+# this grid, whether UKESM-coupled or standalone):
+#   GrIS (EPSG:3413): x0 = -654650.0,  y0 = -3385950.0
+#   AIS  (EPSG:3031): x0 = -3072000.0, y0 = -3072000.0
+#
+# NOTE: The ISMIP7 standard grid has different origins:
+#   GrIS (EPSG:3413): x0 = -720000.0,  y0 = -3450000.0
+#   AIS  (EPSG:3031): x0 = -3040000.0, y0 = -3040000.0
+# If your output is on the standard BISICLES grid (above), a separate
+# regridding step is needed to align with the ISMIP7 standard grid before
+# submission.
+#
+# Leaving null defaults to the standard BISICLES origins above.
+x0: null
+y0: null
+
+
+# ---------------------------------------------------------------------------
+# Time axis
+# ---------------------------------------------------------------------------
+
+# Reference year for the CF time axis.
+# ISMIP7 requires time:units = "days since 1850-01-01", so this must be 1850.
+reference_year: 1850
+
+# CF calendar.  ISMIP7 requires "standard" (Gregorian-Julian as defined by UDUNITS).
+# Use "360_day" only for UKESM-coupled runs with a 360-day model calendar.
+calendar: standard
+
+# ISMIP7 output frequency written to global attributes.
+# Not included in the ISMIP7 filename but retained as a metadata attribute.
+# Common values: yr, dec, mon
+frequency: yr
+
+
+# ---------------------------------------------------------------------------
+# Flotation mask fallback
+# ---------------------------------------------------------------------------
+# Used when the plot file does not contain an explicit 'mask' or 'iceFrac'
+# variable.  The grounded/floating partition is then derived from the
+# flotation criterion using ice thickness and bed topography.
+
+ice_density: 918.0
+water_density: 1028.0
+h_min: 1.0
+
+
+# ---------------------------------------------------------------------------
+# ISMIP7 DRS filename components
+#
+# Output filename pattern:
+#   {variable}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc
+# ---------------------------------------------------------------------------
+
+# Modelling group name.  No underscores, dots or special characters. [required]
+# Example: "BristolGlaciology"
+source_id: ""
+
+# Ice sheet model name and version.  No underscores, dots or special characters.
+# Example: "BISICLES" or "BISICLESv3-2"
+ism_id: "BISICLES"
+
+# ISM choice variant identifier (mNNN format).
+# Increment for each new initial state or ISM parameter choice.
+ism_member_id: "m001"
+
+# CMIP ESM used to produce forcing.  Use "standalone" for idealised/observed forcing.
+# Example: "CESM2-WACCM", "MRI-ESM2-0", "ERA5", "standalone"
+esm_id: "standalone"
+
+# Forcing choice variant identifier (fNNN format).
+# Increment for each new downscaling method or melt parameterisation.
+forcing_member_id: "f001"
+
+# Set counter (Cnnn for CORE, Ennn for ESM, Pnnn for PPE). [required]
+# Links all files for a single model run in the submission spreadsheet.
+# Example: "C001"
+set_counter: "C001"
+
+# Ice sheet identifier. [required]
+#   GrIS  — Greenland Ice Sheet
+#   AIS   — Antarctic Ice Sheet
+ice_sheet: ""
+
+# ISMIP7 experiment identifier. [required]
+# Examples: ctrl_proj, historical, ssp126, ssp245, ssp370, ssp585
+experiment: ""
+
+
+# ---------------------------------------------------------------------------
+# ISMIP7 mandatory global attributes
+# ---------------------------------------------------------------------------
+
+# Modelling group name (written as global attribute 'group').
+# Can be left blank to default to source_id.
+institution: ""
+
+# Contact person name(s). [required for submission]
+contact_name: ""
+
+# Contact person email(s). [required for submission]
+contact_email: ""
+
+# Model source description.
+source: "BISICLES adaptive mesh refinement ice sheet model"
+
+# Additional global attributes as key-value pairs.
+#
+# Example ISMIP7-style attributes:
+#   extra_attrs:
+#     references: "https://doi.org/10.5194/gmd-xx-xxxx-xxxx"
+#     comment: "Standalone BISICLES run for ISMIP7"
+extra_attrs: null
