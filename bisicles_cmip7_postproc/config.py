@@ -164,6 +164,9 @@ _FLATTEN_KEYS = {
     "institution", "source", "experiment", "variant_label", "ice_sheet",
     "extra_attrs", "frequency",
     "ismip7_mode", "model_id", "member_id",
+    "source_id", "ism_id", "ism_member_id",
+    "esm_id", "forcing_member_id", "set_counter",
+    "group", "contact_name", "contact_email",
 }
 
 _DIAG_KEYS = {
@@ -176,11 +179,19 @@ _DIAG_KEYS = {
     "institution", "source", "experiment", "variant_label", "ice_sheet",
     "extra_attrs", "frequency",
     "ismip7_mode", "model_id", "member_id",
+    "source_id", "ism_id", "ism_member_id",
+    "esm_id", "forcing_member_id", "set_counter",
+    "group", "contact_name", "contact_email",
 }
 
 _NC_KWARGS_KEYS = {"institution", "source", "experiment", "variant_label",
                    "ice_sheet", "extra_attrs", "frequency",
-                   "ismip7_mode", "model_id", "member_id"}
+                   "ismip7_mode", "model_id", "member_id",
+                   # ISMIP7 DRS filename components
+                   "source_id", "ism_id", "ism_member_id",
+                   "esm_id", "forcing_member_id", "set_counter",
+                   # ISMIP7 mandatory global attributes
+                   "group", "contact_name", "contact_email"}
 
 
 def _normalise_flatten_cfg(cfg):

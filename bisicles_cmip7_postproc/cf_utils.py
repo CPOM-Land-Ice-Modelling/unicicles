@@ -13,7 +13,8 @@ import datetime
 import numpy as np
 
 CF_CONVENTIONS = "CF-1.12 CMIP-7.0"
-FILL_VALUE = 1.0e20
+FILL_VALUE = 1.0e20                    # standard fill value for CMIP7/UKESM output
+ISMIP7_FILL_VALUE = 9.969209968386869e+36  # netCDF4 default _FillValue for NC_FLOAT (f4), required by ISMIP7
 
 # Mapping from BISICLES filename period strings to CMIP frequency strings.
 _PERIOD_TO_CMIP_FREQUENCY = {
@@ -34,11 +35,27 @@ def period_to_cmip_frequency(period):
     """
     return _PERIOD_TO_CMIP_FREQUENCY.get(period, period)
 
-# UKESM-BISICLES domain origins (lower-left corner of the model grid, metres).
+# Standard BISICLES domain origins (lower-left corner of the model grid, metres).
 # These are the x0/y0 values passed to the flatten file tool for each ice sheet.
+# NOTE: these differ from the ISMIP7 standard grid origins below.  A separate
+# regridding step is needed to move output onto the ISMIP7 standard grid.
 UKESM_GRID_ORIGINS = {
     3413: {"x0": -654650.0,  "y0": -3385950.0},  # GrIS  (EPSG:3413)
     3031: {"x0": -3072000.0, "y0": -3072000.0},  # AIS   (EPSG:3031)
+}
+
+# ISMIP7/ISMIP6 standard grid origins (lower-left cell centre, metres).
+# These are the TARGET grid origins for ISMIP7 submission, provided here for
+# reference.  Bristol BISICLES simulations (both UKESM-coupled and standalone)
+# are run on the standard BISICLES grid (UKESM_GRID_ORIGINS above), so output
+# from this postprocessing tool will be on the standard BISICLES grid.  A
+# separate regridding step
+# is required to interpolate onto the ISMIP7 standard grid before submission.
+# AIS:  761×761 cells at 8 km; domain (−3 040 000, −3 040 000) to (3 040 000, 3 040 000)
+# GrIS: lower-left cell centre at (−720 000, −3 450 000)
+ISMIP7_GRID_ORIGINS = {
+    3413: {"x0": -720000.0,  "y0": -3450000.0},  # GrIS  (EPSG:3413)
+    3031: {"x0": -3040000.0, "y0": -3040000.0},  # AIS   (EPSG:3031)
 }
 
 
@@ -59,6 +76,11 @@ def get_global_attributes(
     conventions=CF_CONVENTIONS,
     model_id="",
     member_id="",
+    # ISMIP7 mandatory global attributes
+    group="",
+    contact_name="",
+    contact_email="",
+    crs="",
     **kwargs,
 ):
     """
@@ -92,9 +114,18 @@ def get_global_attributes(
         CF conventions string.  Defaults to ``"CF-1.12 CMIP-7.0"`` for
         CMIP7-coupled runs; pass ``"CF-1.12"`` for standalone ISMIP7 output.
     model_id : str
-        Model identifier written as a global attribute (ISMIP7 DRS).
+        Model identifier written as a global attribute (CMIP7-coupled runs).
     member_id : str
-        Member identifier written as a global attribute (ISMIP7 DRS).
+        Member identifier written as a global attribute (CMIP7-coupled runs).
+    group : str
+        ISMIP7 mandatory: modelling group name (maps to ``source_id`` in DRS).
+    contact_name : str
+        ISMIP7 mandatory: name(s) of contact person(s).
+    contact_email : str
+        ISMIP7 mandatory: email(s) of contact person(s).
+    crs : str
+        ISMIP7 mandatory: coordinate reference system as an EPSG string,
+        e.g. ``"epsg:3031"`` for AIS or ``"epsg:3413"`` for GrIS.
     **kwargs
         Any additional key-value pairs to include as global attributes.
     """
@@ -120,6 +151,11 @@ def get_global_attributes(
         "grid_label": grid_label,
         "grid": grid,
         "nominal_resolution": nominal_resolution,
+        # ISMIP7 mandatory attributes
+        "group": group,
+        "contact_name": contact_name,
+        "contact_email": contact_email,
+        "crs": crs,
     }
     if source_files:
         attrs["source_file"] = (
@@ -131,36 +167,41 @@ def get_global_attributes(
     return {k: v for k, v in attrs.items() if v not in ("", None)}
 
 
-def _ismip7_drs_filename(varname, ice_sheet, experiment, model_id, member_id,
-                         frequency, times_sorted, mask_no=0):
+def _ismip7_drs_filename(varname, ice_sheet, source_id, ism_id, ism_member_id,
+                         esm_id, forcing_member_id, experiment, set_counter,
+                         times_sorted, mask_no=0):
     """
     Return an ISMIP7 DRS-compliant output filename (without directory path).
 
-    Pattern (no mask):  ``{varname}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc``
-    Pattern (mask N):   ``{varname}_mask{N}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc``
+    Pattern:
+        ``{varname}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_
+          {esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc``
 
-    ``startyr`` and ``endyr`` are integer years derived from *times_sorted*.
-    If *frequency* is empty, ``"yr"`` is used and a warning is emitted.
+    With a regional mask:
+        ``{varname}_mask{N}_{domain_id}_...``
+
+    Parameters match the ISMIP7 data reference syntax (DRS):
+      source_id        Modelling group name (e.g. "BristolGlaciology")
+      ism_id           ISM name and version (e.g. "BISICLES")
+      ism_member_id    ISM choice variant (e.g. "m001")
+      esm_id           CMIP ESM used for forcing (e.g. "CESM2-WACCM" or "standalone")
+      forcing_member_id  Forcing choice variant (e.g. "f001")
+      experiment       Experiment identifier (e.g. "historical", "ssp585")
+      set_counter      Set counter (e.g. "C001", "E001")
     """
-    import warnings
-    freq = frequency or "yr"
-    if not frequency:
-        warnings.warn(
-            "ismip7_mode=True but frequency is not set; defaulting to 'yr'. "
-            "Pass --frequency (CLI) or set frequency: in the config to suppress this.",
-            stacklevel=3,
-        )
     start_yr = int(min(times_sorted))
     end_yr   = int(max(times_sorted))
     mask_part = f"_mask{mask_no}" if mask_no else ""
     return (
-        f"{varname}{mask_part}_{ice_sheet}_{experiment}_"
-        f"{model_id}_{member_id}_{freq}_{start_yr}-{end_yr}.nc"
+        f"{varname}{mask_part}_{ice_sheet}_{source_id}_{ism_id}_"
+        f"{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_"
+        f"{set_counter}_{start_yr}-{end_yr}.nc"
     )
 
 
 _DAYS_PER_YEAR = {
-    "gregorian": 365.25,  # tropical year used by BISICLES internally
+    "standard": 365.25,   # CF standard (Gregorian-Julian) calendar — required by ISMIP7
+    "gregorian": 365.25,  # CF synonym for "standard"; accepted for backward compatibility
     "360_day":   360.0,   # 360-day calendar used by UKESM
 }
 
@@ -203,7 +244,10 @@ def years_to_days(time_years, reference_year=1850, calendar="gregorian"):
     days_per_year = _DAYS_PER_YEAR[calendar]
     days = (np.asarray(time_years, dtype=float) - reference_year) * days_per_year
     units = f"days since {reference_year:04d}-01-01 00:00:00"
-    return days, units, calendar
+    # Normalise "gregorian" to "standard" in the returned calendar string so that
+    # the NetCDF attribute matches what ISMIP7 and CF compliance checkers expect.
+    cf_calendar = "standard" if calendar == "gregorian" else calendar
+    return days, units, cf_calendar
 
 
 def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
@@ -231,7 +275,7 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
     """
     _crs_table = {
         # Antarctic Polar Stereographic (standard BISICLES AIS grid)
-        # UKESM domain origin: x0=-3072000, y0=-3072000
+        # Standard BISICLES domain origin: x0=-3072000, y0=-3072000
         3031: {
             "grid_mapping_name": "polar_stereographic",
             "straight_vertical_longitude_from_pole": 0.0,
@@ -263,7 +307,7 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
             "epsg_code": "EPSG:3031",
         },
         # NSIDC Sea Ice Polar Stereographic North (standard BISICLES GrIS grid)
-        # UKESM domain origin: x0=-654650, y0=-3385950
+        # Standard BISICLES domain origin: x0=-654650, y0=-3385950
         3413: {
             "grid_mapping_name": "polar_stereographic",
             "straight_vertical_longitude_from_pole": -45.0,
@@ -315,7 +359,7 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
     return attrs
 
 
-def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian"):
+def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian", dtype="f8"):
     """
     Add a CF-compliant time variable to an open NetCDF4 Dataset.
 
@@ -329,6 +373,9 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian")
         Reference epoch year.
     calendar : str
         CF calendar name: ``"gregorian"`` (default) or ``"360_day"``.
+    dtype : str
+        NetCDF data type for the time variable.  Use ``"f8"`` (double,
+        default) for CMIP7/UKESM output; ``"f4"`` (single) for ISMIP7.
 
     Returns
     -------
@@ -336,8 +383,8 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian")
         The created time variable.
     """
     days, units, calendar = years_to_days(time_years, reference_year, calendar)
-    time_var = ds.createVariable("time", "f8", ("time",))
-    time_var[:] = days
+    time_var = ds.createVariable("time", dtype, ("time",))
+    time_var[:] = days.astype(np.float32) if dtype == "f4" else days
     time_var.standard_name = "time"
     time_var.long_name = "time"
     time_var.units = units
@@ -346,7 +393,7 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian")
     return time_var
 
 
-def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="gregorian"):
+def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="gregorian", dtype="f8"):
     """
     Add a ``time_bnds`` variable to an open NetCDF4 Dataset.
 
@@ -366,6 +413,9 @@ def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="g
     calendar : str
         CF calendar name: ``"gregorian"`` (default) or ``"360_day"``.
         Must match the calendar used when the ``time`` variable was created.
+    dtype : str
+        NetCDF data type.  Use ``"f8"`` (double, default) for CMIP7/UKESM
+        output; ``"f4"`` (single) for ISMIP7.
     """
     start_days, _, _ = years_to_days(np.asarray(start_years, dtype=float), reference_year, calendar)
     end_days, _, _ = years_to_days(np.asarray(end_years, dtype=float), reference_year, calendar)
@@ -373,7 +423,7 @@ def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="g
     if "bnds" not in ds.dimensions:
         ds.createDimension("bnds", 2)
 
-    bnds_var = ds.createVariable("time_bnds", "f8", ("time", "bnds"))
+    bnds_var = ds.createVariable("time_bnds", dtype, ("time", "bnds"))
     bnds_var[:, 0] = start_days
     bnds_var[:, 1] = end_days
 

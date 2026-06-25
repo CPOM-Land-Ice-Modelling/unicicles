@@ -88,9 +88,10 @@ def _add_metadata_args(parser):
     )
     grp.add_argument(
         "--calendar", default="gregorian", dest="calendar",
-        choices=["gregorian", "360_day"],
+        choices=["standard", "gregorian", "360_day"],
         help=(
             "CF calendar for the time axis (default: gregorian, 365.25 days/year). "
+            "'standard' is accepted as a synonym for 'gregorian'. "
             "Use '360_day' for UKESM-coupled runs (360 days/year)."
         ),
     )
@@ -305,7 +306,7 @@ def _build_flatten_parser():
         "--x0", type=float, default=None, dest="x0",
         help=(
             "X-coordinate of the lower-left corner of the domain in metres. "
-            "Defaults to the UKESM standard value for the chosen EPSG code "
+            "Defaults to the standard BISICLES grid value for the chosen EPSG code "
             "(GrIS/3413: -654650.0; AIS/3031: -3072000.0)."
         ),
     )
@@ -313,7 +314,7 @@ def _build_flatten_parser():
         "--y0", type=float, default=None, dest="y0",
         help=(
             "Y-coordinate of the lower-left corner of the domain in metres. "
-            "Defaults to the UKESM standard value for the chosen EPSG code "
+            "Defaults to the standard BISICLES grid value for the chosen EPSG code "
             "(GrIS/3413: -3385950.0; AIS/3031: -3072000.0)."
         ),
     )
@@ -517,21 +518,46 @@ def run_config_cli(args=None):
 # ---------------------------------------------------------------------------
 
 def _add_ismip7_metadata_args(parser):
-    """Add ISMIP7 DRS metadata arguments (model-id, member-id)."""
+    """Add ISMIP7 DRS metadata arguments for the ISM submission filename and global attributes."""
     grp = parser.add_argument_group("ISMIP7 DRS metadata")
     grp.add_argument(
-        "--model-id", default="BISICLES", dest="model_id",
+        "--source-id", default="", dest="source_id",
+        help="Modelling group name for ISMIP7 DRS (e.g. 'BristolGlaciology'). [required]",
+    )
+    grp.add_argument(
+        "--ism-id", default="BISICLES", dest="ism_id",
+        help="ISM name and version for ISMIP7 DRS (default: 'BISICLES').",
+    )
+    grp.add_argument(
+        "--ism-member-id", default="m001", dest="ism_member_id",
+        help="ISM choice variant identifier for ISMIP7 DRS (default: 'm001').",
+    )
+    grp.add_argument(
+        "--esm-id", default="standalone", dest="esm_id",
         help=(
-            "ISMIP7 model identifier written in the DRS output filename and as "
-            "a global attribute (default: 'BISICLES')."
+            "CMIP ESM name used for forcing, for ISMIP7 DRS "
+            "(e.g. 'CESM2-WACCM'; default: 'standalone' for idealised forcing)."
         ),
     )
     grp.add_argument(
-        "--member-id", default="r1", dest="member_id",
-        help=(
-            "ISMIP7 member identifier written in the DRS output filename and as "
-            "a global attribute (default: 'r1')."
-        ),
+        "--forcing-member-id", default="f001", dest="forcing_member_id",
+        help="Forcing choice variant identifier for ISMIP7 DRS (default: 'f001').",
+    )
+    grp.add_argument(
+        "--set-counter", default="C001", dest="set_counter",
+        help="Set counter for ISMIP7 DRS (e.g. 'C001', 'E001'; default: 'C001').",
+    )
+    grp.add_argument(
+        "--group", default="", dest="group",
+        help="Modelling group name for ISMIP7 global attribute 'group'.",
+    )
+    grp.add_argument(
+        "--contact-name", default="", dest="contact_name",
+        help="Contact person name(s) for ISMIP7 mandatory global attribute.",
+    )
+    grp.add_argument(
+        "--contact-email", default="", dest="contact_email",
+        help="Contact person email(s) for ISMIP7 mandatory global attribute.",
     )
 
 
@@ -547,6 +573,8 @@ def _build_ismip7_diagnostics_parser():
         "write ISMIP7 DRS-named CF-compliant scalar timeseries NetCDF files."
     )
     _add_ismip7_metadata_args(p)
+    # ISMIP7 requires "standard" calendar; override the CMIP7 default of "gregorian"
+    p.set_defaults(calendar="standard")
     return p
 
 
@@ -578,8 +606,15 @@ def run_ismip7_diagnostics_cli(args=None):
         ice_sheet=ns.ice_sheet,
         frequency=ns.frequency or "yr",
         ismip7_mode=True,
-        model_id=ns.model_id,
-        member_id=ns.member_id,
+        source_id=ns.source_id,
+        ism_id=ns.ism_id,
+        ism_member_id=ns.ism_member_id,
+        esm_id=ns.esm_id,
+        forcing_member_id=ns.forcing_member_id,
+        set_counter=ns.set_counter,
+        group=ns.group,
+        contact_name=ns.contact_name,
+        contact_email=ns.contact_email,
     )
 
     input_path = Path(ns.input)
@@ -638,6 +673,8 @@ def _build_ismip7_flatten_parser():
         "write ISMIP7 DRS-named CF-compliant 2D spatial NetCDF files."
     )
     _add_ismip7_metadata_args(p)
+    # ISMIP7 requires "standard" calendar; override the CMIP7 default of "gregorian"
+    p.set_defaults(calendar="standard")
     return p
 
 
@@ -669,8 +706,15 @@ def run_ismip7_flatten_cli(args=None):
         ice_sheet=ns.ice_sheet,
         frequency=ns.frequency or "yr",
         ismip7_mode=True,
-        model_id=ns.model_id,
-        member_id=ns.member_id,
+        source_id=ns.source_id,
+        ism_id=ns.ism_id,
+        ism_member_id=ns.ism_member_id,
+        esm_id=ns.esm_id,
+        forcing_member_id=ns.forcing_member_id,
+        set_counter=ns.set_counter,
+        group=ns.group,
+        contact_name=ns.contact_name,
+        contact_email=ns.contact_email,
     )
 
     input_path = Path(ns.input)

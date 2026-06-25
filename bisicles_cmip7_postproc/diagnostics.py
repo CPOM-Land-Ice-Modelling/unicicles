@@ -33,6 +33,7 @@ from .cmip7_vars import SCALAR_MAPPING, ICE_DENSITY, SECS_PER_YEAR
 from .cf_utils import (
     CF_CONVENTIONS,
     FILL_VALUE,
+    ISMIP7_FILL_VALUE,
     get_global_attributes,
     period_to_cmip_frequency,
     add_time_variable,
@@ -292,7 +293,7 @@ def write_diagnostics_netcdf(
     records,
     output_dir,
     reference_year=1850,
-    calendar="gregorian",
+    calendar="standard",
     ice_sheet="",
     institution="",
     source="BISICLES adaptive mesh refinement ice sheet model",
@@ -304,6 +305,17 @@ def write_diagnostics_netcdf(
     ismip7_mode=False,
     model_id="",
     member_id="",
+    # ISMIP7 DRS filename components
+    source_id="",
+    ism_id="",
+    ism_member_id="m001",
+    esm_id="standalone",
+    forcing_member_id="f001",
+    set_counter="C001",
+    # ISMIP7 mandatory global attributes
+    group="",
+    contact_name="",
+    contact_email="",
 ):
     """
     Write one CF-compliant scalar timeseries NetCDF per variable from parsed
@@ -345,11 +357,30 @@ def write_diagnostics_netcdf(
         variable to satisfy CF-1.12 requirements.
     ismip7_mode : bool
         If True, write ISMIP7-compliant output: DRS filenames, ``Conventions``
-        set to ``"CF-1.12"``, and ``model_id`` / ``member_id`` global attributes.
+        set to ``"CF-1.12"``, and ISMIP7 mandatory global attributes.
     model_id : str
-        ISMIP7 model identifier used in the DRS filename and global attributes.
+        Model identifier for the CMIP7-coupled workflow (global attribute).
     member_id : str
-        ISMIP7 member identifier used in the DRS filename and global attributes.
+        Member identifier for the CMIP7-coupled workflow (global attribute).
+    source_id : str
+        ISMIP7 DRS: modelling group name (e.g. ``"BristolGlaciology"``).
+    ism_id : str
+        ISMIP7 DRS: ISM name and version (e.g. ``"BISICLES"``).
+    ism_member_id : str
+        ISMIP7 DRS: ISM choice variant identifier (default ``"m001"``).
+    esm_id : str
+        ISMIP7 DRS: CMIP ESM used for forcing (e.g. ``"CESM2-WACCM"`` or
+        ``"standalone"`` for idealised forcing).
+    forcing_member_id : str
+        ISMIP7 DRS: forcing choice variant identifier (default ``"f001"``).
+    set_counter : str
+        ISMIP7 DRS: set counter (e.g. ``"C001"``).
+    group : str
+        ISMIP7 mandatory global attribute: modelling group name.
+    contact_name : str
+        ISMIP7 mandatory global attribute: contact person name(s).
+    contact_email : str
+        ISMIP7 mandatory global attribute: contact person email(s).
 
     Returns
     -------
@@ -374,6 +405,10 @@ def write_diagnostics_netcdf(
         if first_info.period:
             frequency = period_to_cmip_frequency(first_info.period)
 
+    # In ISMIP7 mode, populate group/model from DRS fields when not set explicitly
+    _group = group or source_id
+    _model = ism_id
+
     global_attrs = get_global_attributes(
         institution=institution,
         source=source,
@@ -385,9 +420,20 @@ def write_diagnostics_netcdf(
         conventions="CF-1.12" if ismip7_mode else CF_CONVENTIONS,
         model_id=model_id,
         member_id=member_id,
+        group=_group if ismip7_mode else group,
+        contact_name=contact_name,
+        contact_email=contact_email,
     )
+    if ismip7_mode and _model:
+        global_attrs["model"] = _model
     if extra_attrs:
         global_attrs.update(extra_attrs)
+
+    # ISMIP7 requires f4 precision and the netCDF4 default fill value;
+    # UKESM/CMIP7 output uses f8 precision and the conventional 1e20 fill value.
+    _fill_value = ISMIP7_FILL_VALUE if ismip7_mode else FILL_VALUE
+    _time_dtype = "f4" if ismip7_mode else "f8"
+    _var_dtype  = "f4" if ismip7_mode else "f8"
 
     time_arr = np.asarray(times)
 
@@ -417,8 +463,9 @@ def write_diagnostics_netcdf(
         var_name = cname if mask_no == 0 else f"{cname}_mask{mask_no}"
         if ismip7_mode:
             out_path = output_dir / _ismip7_drs_filename(
-                cname, ice_sheet, experiment, model_id, member_id,
-                frequency, time_arr, mask_no=mask_no,
+                cname, ice_sheet, source_id, ism_id, ism_member_id,
+                esm_id, forcing_member_id, experiment, set_counter,
+                time_arr, mask_no=mask_no,
             )
         else:
             out_path = output_dir / f"{var_name}.nc"
@@ -431,19 +478,22 @@ def write_diagnostics_netcdf(
             ds.variable_name = cname
             ds.title = m["long_name"] if ismip7_mode else f"UniCiCles (BISICLES) output from UKESM: {m['long_name']}"
 
-            # Time dimension and variable
-            ds.createDimension("time", len(times))
-            add_time_variable(ds, time_arr, reference_year=reference_year, calendar=calendar)
+            # Time dimension (unlimited record dimension) and variable
+            ds.createDimension("time", None)
+            add_time_variable(ds, time_arr, reference_year=reference_year,
+                              calendar=calendar, dtype=_time_dtype)
 
             # Time bounds for time-mean data
             if has_time_bounds:
                 add_time_bounds(ds, start_years, end_years,
-                                reference_year=reference_year, calendar=calendar)
+                                reference_year=reference_year, calendar=calendar,
+                                dtype=_time_dtype)
 
             var = ds.createVariable(
-                var_name, "f8", ("time",), fill_value=FILL_VALUE
+                var_name, _var_dtype, ("time",), fill_value=_fill_value
             )
-            var[:] = np.where(np.isnan(values), FILL_VALUE, values)
+            _cast = np.float32 if _var_dtype == "f4" else np.float64
+            var[:] = np.where(np.isnan(values), _fill_value, values).astype(_cast)
             var.standard_name = m["standard_name"]
             var.long_name = m["long_name"]
             var.units = m["cmip7_units"]

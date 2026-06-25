@@ -68,8 +68,8 @@ epsg: null
 level: 0
 
 # X/Y coordinates of the lower-left corner of the domain (metres).
-# When null and epsg matches a known UKESM grid, the UKESM standard origin
-# is used automatically:
+# When null and epsg matches a known standard BISICLES grid, the standard
+# BISICLES origin is used automatically:
 #   GrIS (3413): x0 = -654650.0,  y0 = -3385950.0
 #   AIS  (3031): x0 = -3072000.0, y0 = -3072000.0
 x0: null

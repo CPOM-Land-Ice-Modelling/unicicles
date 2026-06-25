@@ -69,6 +69,7 @@ from .cmip7_vars import (
 from .cf_utils import (
     CF_CONVENTIONS,
     FILL_VALUE,
+    ISMIP7_FILL_VALUE,
     UKESM_GRID_ORIGINS,
     get_global_attributes,
     period_to_cmip_frequency,
@@ -385,7 +386,7 @@ def _compute_derived_fields(
 # ---------------------------------------------------------------------------
 
 def _write_2d_var(ds, out_name, arr_3d, mapping, time_cell_method, grid_mapping,
-                  bisicles_name=None, coordinates=""):
+                  bisicles_name=None, coordinates="", fill_value=FILL_VALUE):
     """
     Write one ``(time, y, x)`` data variable with full CF/CMIP7 metadata.
 
@@ -415,18 +416,22 @@ def _write_2d_var(ds, out_name, arr_3d, mapping, time_cell_method, grid_mapping,
         auxiliary coordinates (e.g. ``"lat lon"``) should be listed here —
         dimension coordinates (``x``, ``y``, ``time``) are self-identifying
         and must NOT appear.  Pass an empty string to omit the attribute.
+    fill_value : float
+        Fill value to use for missing data.  Use :data:`FILL_VALUE` (1e20,
+        default) for CMIP7/UKESM output and :data:`ISMIP7_FILL_VALUE` for
+        ISMIP7 submissions.
     """
     arr = arr_3d * mapping["conversion_factor"]
-    arr = np.where(np.isnan(arr), FILL_VALUE, arr)
+    arr = np.where(np.isnan(arr), fill_value, arr)
     cell_methods = mapping["cell_methods"]
     if time_cell_method == "time: point":
         cell_methods = cell_methods.replace("time: mean", "time: point")
-    var = ds.createVariable(out_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE)
+    var = ds.createVariable(out_name, "f4", ("time", "y", "x"), fill_value=fill_value)
     var[:] = arr
     var.standard_name = mapping["standard_name"]
     var.long_name = mapping["long_name"]
     var.units = mapping["cmip7_units"]
-    var.missing_value = np.float32(FILL_VALUE)
+    var.missing_value = np.float32(fill_value)
     var.cell_methods = cell_methods
     var.modeling_realm = mapping["modeling_realm"]
     if coordinates:
@@ -451,7 +456,7 @@ def write_cmip7_per_variable_netcdfs(
     x0=None,
     y0=None,
     reference_year=1850,
-    calendar="gregorian",
+    calendar="standard",
     cmip7_only=False,
     ice_density=918.0,
     water_density=1028.0,
@@ -467,6 +472,17 @@ def write_cmip7_per_variable_netcdfs(
     ismip7_mode=False,
     model_id="",
     member_id="",
+    # ISMIP7 DRS filename components
+    source_id="",
+    ism_id="",
+    ism_member_id="m001",
+    esm_id="standalone",
+    forcing_member_id="f001",
+    set_counter="C001",
+    # ISMIP7 mandatory global attributes
+    group="",
+    contact_name="",
+    contact_email="",
 ):
     """
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
@@ -520,13 +536,30 @@ def write_cmip7_per_variable_netcdfs(
         Additional global attributes.
     ismip7_mode : bool
         If True, write ISMIP7-compliant output: DRS filenames, ``Conventions``
-        set to ``"CF-1.12"``, and ``model_id`` / ``member_id`` global attributes.
+        set to ``"CF-1.12"``, and ISMIP7 mandatory global attributes.
     model_id : str
-        ISMIP7 model identifier used in the DRS filename and global attributes
-        (e.g. ``'BISICLES'``).  Only relevant when *ismip7_mode* is True.
+        Model identifier for the CMIP7-coupled workflow (global attribute).
     member_id : str
-        ISMIP7 member identifier used in the DRS filename and global attributes
-        (e.g. ``'r1'``).  Only relevant when *ismip7_mode* is True.
+        Member identifier for the CMIP7-coupled workflow (global attribute).
+    source_id : str
+        ISMIP7 DRS: modelling group name (e.g. ``"BristolGlaciology"``).
+    ism_id : str
+        ISMIP7 DRS: ISM name and version (e.g. ``"BISICLES"``).
+    ism_member_id : str
+        ISMIP7 DRS: ISM choice variant identifier (default ``"m001"``).
+    esm_id : str
+        ISMIP7 DRS: CMIP ESM used for forcing (e.g. ``"CESM2-WACCM"`` or
+        ``"standalone"`` for idealised forcing).
+    forcing_member_id : str
+        ISMIP7 DRS: forcing choice variant identifier (default ``"f001"``).
+    set_counter : str
+        ISMIP7 DRS: set counter (e.g. ``"C001"``).
+    group : str
+        ISMIP7 mandatory global attribute: modelling group name.
+    contact_name : str
+        ISMIP7 mandatory global attribute: contact person name(s).
+    contact_email : str
+        ISMIP7 mandatory global attribute: contact person email(s).
 
     Returns
     -------
@@ -676,6 +709,16 @@ def write_cmip7_per_variable_netcdfs(
         if first_info is not None and first_info.period:
             frequency = period_to_cmip_frequency(first_info.period)
 
+    # ISMIP7 requires f4 precision and the netCDF4 default fill value;
+    # UKESM/CMIP7 output uses f8 for time/geometry and the conventional 1e20 fill value.
+    _fill_value = ISMIP7_FILL_VALUE if ismip7_mode else FILL_VALUE
+    _time_dtype = "f4" if ismip7_mode else "f8"
+    _geom_dtype = "f4" if ismip7_mode else "f8"
+
+    # In ISMIP7 mode, populate group/model from DRS fields when not set explicitly
+    _group = group or source_id
+    _crs_str = f"epsg:{epsg}" if (ismip7_mode and epsg is not None) else ""
+
     global_attrs = get_global_attributes(
         institution=institution,
         source=source,
@@ -687,7 +730,13 @@ def write_cmip7_per_variable_netcdfs(
         conventions="CF-1.12" if ismip7_mode else CF_CONVENTIONS,
         model_id=model_id,
         member_id=member_id,
+        group=_group if ismip7_mode else group,
+        contact_name=contact_name,
+        contact_email=contact_email,
+        crs=_crs_str,
     )
+    if ismip7_mode and ism_id:
+        global_attrs["model"] = ism_id
     global_attrs["external_variables"] = "modelcellareai"
     if extra_attrs:
         global_attrs.update(extra_attrs)
@@ -708,14 +757,16 @@ def write_cmip7_per_variable_netcdfs(
     def _setup_ds(ds):
         """Populate dimensions, coordinates, and global attributes."""
         ds.setncatts(global_attrs)
-        ds.createDimension("time", len(times_sorted))
+        ds.createDimension("time", None)  # unlimited record dimension
         ds.createDimension("y", ny)
         ds.createDimension("x", nx_size)
         add_xy_variables(ds, x, y, epsg_code=epsg)
-        add_time_variable(ds, time_arr, reference_year=reference_year, calendar=calendar)
+        add_time_variable(ds, time_arr, reference_year=reference_year,
+                          calendar=calendar, dtype=_time_dtype)
         if has_time_bounds:
             add_time_bounds(ds, _tb_start, _tb_end,
-                            reference_year=reference_year, calendar=calendar)
+                            reference_year=reference_year, calendar=calendar,
+                            dtype=_time_dtype)
         if epsg is not None:
             add_crs_variable(ds, epsg, x0=x0, y0=y0)
         if has_latlon:
@@ -731,8 +782,9 @@ def write_cmip7_per_variable_netcdfs(
         """Return the output Path for a variable."""
         if ismip7_mode:
             fname = _ismip7_drs_filename(
-                varname, ice_sheet, experiment, model_id, member_id,
-                frequency, times_sorted, mask_no=mask_no,
+                varname, ice_sheet, source_id, ism_id, ism_member_id,
+                esm_id, forcing_member_id, experiment, set_counter,
+                times_sorted, mask_no=mask_no,
             )
         else:
             fname = f"{varname}.nc"
@@ -758,7 +810,7 @@ def write_cmip7_per_variable_netcdfs(
             ds.title = _title(mapping["long_name"])
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
                           grid_mapping, bisicles_name=bisicles_name,
-                          coordinates=coords_str)
+                          coordinates=coords_str, fill_value=_fill_value)
         output_files.append(out_path)
 
     # 2. CF-output name -> CMIP7 (plot.CF-*.hdf5 files)
@@ -774,7 +826,8 @@ def write_cmip7_per_variable_netcdfs(
             ds.variable_name = out_name
             ds.title = _title(mapping["long_name"])
             _write_2d_var(ds, out_name, arr_stack, mapping, time_cell_method,
-                          grid_mapping, coordinates=coords_str)
+                          grid_mapping, coordinates=coords_str,
+                          fill_value=_fill_value)
         output_files.append(out_path)
 
     # 3. Derived fields (sftgrf, sftflf) – skip if CF file already provided them
@@ -785,7 +838,7 @@ def write_cmip7_per_variable_netcdfs(
             continue
         arr_stack = np.stack(_sort(derived_arrays[derived_name]), axis=0)
         arr_stack = arr_stack * dmeta["conversion_factor"]
-        arr_stack = np.where(np.isnan(arr_stack), FILL_VALUE, arr_stack)
+        arr_stack = np.where(np.isnan(arr_stack), _fill_value, arr_stack)
         cell_methods = dmeta["cell_methods"]
         if time_cell_method == "time: point":
             cell_methods = cell_methods.replace("time: mean", "time: point")
@@ -796,13 +849,13 @@ def write_cmip7_per_variable_netcdfs(
             ds.variable_name = derived_name
             ds.title = _title(dmeta["long_name"])
             var = ds.createVariable(
-                derived_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
+                derived_name, "f4", ("time", "y", "x"), fill_value=_fill_value
             )
             var[:] = arr_stack
             var.standard_name = dmeta["standard_name"]
             var.long_name = dmeta["long_name"]
             var.units = dmeta["cmip7_units"]
-            var.missing_value = np.float32(FILL_VALUE)
+            var.missing_value = np.float32(_fill_value)
             var.cell_methods = cell_methods
             var.modeling_realm = dmeta["modeling_realm"]
             if coords_str:
@@ -819,7 +872,7 @@ def write_cmip7_per_variable_netcdfs(
     if not cmip7_only:
         for bname, arr_list in unmapped_arrays.items():
             arr_stack = np.stack(_sort(arr_list), axis=0)
-            arr_stack = np.where(np.isnan(arr_stack), FILL_VALUE, arr_stack)
+            arr_stack = np.where(np.isnan(arr_stack), _fill_value, arr_stack)
             safe_name = bname.replace("/", "_")
             out_path = output_dir / f"{safe_name}.nc"
             with Dataset(str(out_path), "w", format="NETCDF4") as ds:
@@ -828,7 +881,7 @@ def write_cmip7_per_variable_netcdfs(
                 ds.variable_name = safe_name
                 ds.title = _title(bname)
                 var = ds.createVariable(
-                    safe_name, "f4", ("time", "y", "x"), fill_value=FILL_VALUE
+                    safe_name, "f4", ("time", "y", "x"), fill_value=_fill_value
                 )
                 var[:] = arr_stack
                 var.long_name = bname
@@ -859,7 +912,7 @@ def write_cmip7_per_variable_netcdfs(
                 add_crs_variable(ds, epsg, x0=x0, y0=y0)
             if has_latlon:
                 add_latlon_variables(ds, lat_2d, lon_2d)
-            var = ds.createVariable(geom_name, "f8", ("y", "x"))
+            var = ds.createVariable(geom_name, _geom_dtype, ("y", "x"))
             var[:] = cell_area
             var.standard_name = gmeta["standard_name"]
             var.long_name = gmeta["long_name"]
@@ -987,11 +1040,12 @@ def process_plotfile(
         EPSG code for the projection.  Overrides value from HDF5 metadata.
     x0 : float, optional
         X-coordinate of the lower-left corner of the domain (metres).
-        Defaults to the UKESM standard value for the given ``epsg_code``
+        Defaults to the standard BISICLES value for the given ``epsg_code``
         (see :data:`cf_utils.UKESM_GRID_ORIGINS`).
     y0 : float, optional
         Y-coordinate of the lower-left corner of the domain (metres).
-        Defaults to the UKESM standard value for the given ``epsg_code``.
+        Defaults to the standard BISICLES value for the given ``epsg_code``
+        (see :data:`cf_utils.UKESM_GRID_ORIGINS`).
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1043,7 +1097,7 @@ def process_plotfile(
     if file_info is not None and not nc_kwargs.get("ice_sheet"):
         nc_kwargs["ice_sheet"] = file_info.ice_sheet
 
-    # Fall back to UKESM standard grid origins when x0/y0 not supplied
+    # Fall back to standard BISICLES grid origins when x0/y0 not supplied
     if (x0 is None or y0 is None) and epsg_code in UKESM_GRID_ORIGINS:
         origin = UKESM_GRID_ORIGINS[epsg_code]
         if x0 is None:
@@ -1051,7 +1105,7 @@ def process_plotfile(
         if y0 is None:
             y0 = origin["y0"]
         if verbose:
-            print(f"  Using UKESM default grid origin: x0={x0}, y0={y0}")
+            print(f"  Using standard BISICLES grid origin: x0={x0}, y0={y0}")
 
     if verbose:
         print(f"Flattening {plot_file.name} onto level {level}...")
@@ -1136,10 +1190,10 @@ def process_directory(
         EPSG code for the projection.
     x0 : float, optional
         X-coordinate of the lower-left corner of the domain (metres).
-        Defaults to the UKESM standard value for the given ``epsg_code``.
+        Defaults to the standard BISICLES value for the given ``epsg_code``.
     y0 : float, optional
         Y-coordinate of the lower-left corner of the domain (metres).
-        Defaults to the UKESM standard value for the given ``epsg_code``.
+        Defaults to the standard BISICLES value for the given ``epsg_code``.
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1174,7 +1228,7 @@ def process_directory(
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Fall back to UKESM standard grid origins when x0/y0 not supplied
+    # Fall back to standard BISICLES grid origins when x0/y0 not supplied
     if (x0 is None or y0 is None) and epsg_code in UKESM_GRID_ORIGINS:
         origin = UKESM_GRID_ORIGINS[epsg_code]
         if x0 is None:
@@ -1182,7 +1236,7 @@ def process_directory(
         if y0 is None:
             y0 = origin["y0"]
         if verbose:
-            print(f"Using UKESM default grid origin: x0={x0}, y0={y0}")
+            print(f"Using standard BISICLES grid origin: x0={x0}, y0={y0}")
 
     plot_files = find_plot_files(directory, pattern=plot_pattern)
     if verbose:

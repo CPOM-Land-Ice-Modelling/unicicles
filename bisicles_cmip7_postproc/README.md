@@ -147,12 +147,16 @@ and drop the leading `--` (e.g. `--output-dir` becomes `output_dir`).
     Full path to the BISICLES flatten or diagnostics executable.
 
 **--reference-year** / `reference_year`  [default: 1850]
-    Reference year for the CF time axis (days since YYYY-01-01).
+    Reference year for the CF time axis (`days since YYYY-01-01`).
 
 **--calendar** / `calendar`  [default: gregorian]  [UKESM]
     CF calendar for converting simulation years to days.
-      gregorian  -- 365.25 days/year (standard BISICLES)
-      360_day    -- 360 days/year (UKESM-coupled runs)
+      gregorian / standard  -- 365.25 days/year (standalone BISICLES / CMIP7)
+      360_day               -- 360 days/year (UKESM-coupled runs)
+    `standard` is accepted as a synonym for `gregorian`.
+    The ISMIP7 commands (`bike-ismip7-*`) default to `standard` instead of
+    `gregorian`; both produce identical data, but ISMIP7 requires the attribute
+    to be written as `"standard"` in the NetCDF file.
 
 **--ice-sheet** / `ice_sheet`  [default: auto-detected from filename]
     Ice sheet identifier written to NetCDF global attributes.
@@ -195,17 +199,26 @@ extra_attrs:
     AMR refinement level to flatten onto. 0 = coarsest grid; higher values
     give finer resolution. Must be >= 0.
 
-**--x0** / `x0`  [default: UKESM standard for the given EPSG]
-**--y0** / `y0`  [default: UKESM standard for the given EPSG]
+**--x0** / `x0`  [default: see below]
+**--y0** / `y0`  [default: see below]
     X/Y coordinates of the lower-left corner of the domain in metres.
-    When not set and epsg is a known UKESM grid, the standard origin is used:
+    These must match the grid origin the BISICLES simulation was run with.
 
-```text
-Ice sheet  EPSG   x0            y0
----------  ----   ----------    -----------
-GrIS       3413   -654650.0     -3385950.0
-AIS        3031   -3072000.0    -3072000.0
-```
+    All Bristol BISICLES runs (both UKESM-coupled and standalone) use the
+    standard BISICLES grid origins, which are the defaults when x0/y0 are
+    not supplied:
+
+    ```text
+    Ice sheet  EPSG   x0 (standard BISICLES)  y0 (standard BISICLES)
+    ---------  ----   ----------------------  ----------------------
+    GrIS       3413   -654650.0               -3385950.0
+    AIS        3031   -3072000.0              -3072000.0
+    ```
+
+    Note: the ISMIP7 standard grid uses different origins. If submitting to
+    ISMIP7, a separate regridding step is needed after running this tool — do
+    not simply pass the ISMIP7 standard origins here unless your BISICLES run
+    was configured to use them.
 
 **--cmip7-only** / `cmip7_only`  [default: false]
     Only write CMIP7-standard variables. When false, unmapped BISICLES
@@ -268,12 +281,16 @@ extra_attrs:
 
 Each output NetCDF file contains:
 
-- A single data variable with a `time` dimension (and `y`, `x` for 2D fields).
-- A `time` coordinate in CF `days since YYYY-01-01` units, with `time_bnds`
-  added for time-mean files.
-- `x` and `y` projected coordinates, plus 2-D `lat`/`lon` auxiliary coordinates
-  (flatten workflow only; requires pyproj).
+- A single data variable (2D spatial fields written as **f4**; scalar timeseries
+  written as **f8** for CMIP7/UKESM, **f4** for ISMIP7).
+- A `time` dimension (unlimited record dimension) with a CF time coordinate
+  (`days since YYYY-01-01`). Time coordinate written as **f8** for CMIP7/UKESM,
+  **f4** for ISMIP7. Time-mean files include a `time_bnds` variable.
+- `x` and `y` projected coordinates (1-D), plus 2-D `lat`/`lon` auxiliary
+  coordinates (flatten workflow only; requires pyproj).
 - A `crs` grid-mapping variable with full projection metadata (flatten only).
+- A `_FillValue` of `1.0e20` for CMIP7/UKESM output, or `9.969209968386869e+36`
+  (netCDF4 default for f4) for ISMIP7 output.
 - Global attributes: `Conventions`, `history`, `institution`, `experiment`,
   `variant_label`, `ice_sheet`, and `source_file` (the basename(s) of the
   input HDF5 file(s) that produced this output).
@@ -289,32 +306,64 @@ simulations (not coupled to UKESM) and producing ISMIP7-compliant output:
 
 The key differences from the CMIP7-coupled workflow are:
 
-- **Output filenames** follow the ISMIP7 DRS convention:
-  `{varname}_{icesheet}_{exp}_{model}_{member}_{freq}_{startyr}-{endyr}.nc`
-  e.g. `lithk_AIS_ctrl_proj_BISICLES_r1_yr_2015-2100.nc`
+- **Output filenames** follow the full ISMIP7 DRS convention (see below).
 - **`Conventions`** global attribute is set to `"CF-1.12"` (not `"CF-1.12 CMIP-7.0"`).
-- **`model_id`** and **`member_id`** are written as global attributes.
-- **Simulation time** is read directly from the BISICLES HDF5 internal time
-  counter (not from the filename), which is the authoritative source for
-  standalone runs.
-- **Calendar** defaults to `gregorian` (365.25 days/year).
+- **ISMIP7 mandatory global attributes** (`group`, `model`, `contact_name`,
+  `contact_email`, `crs`) are written automatically.
+- **Calendar** defaults to `standard` (365.25 days/year).
+- **Reference year** must be `1850` (giving `time:units = "days since 1850-01-01"`).
 - **Variable names and metadata** are identical to the CMIP7 workflow.
+
+### ISMIP7 DRS filename format
+
+Output filenames follow the ISMIP7 data reference syntax exactly:
+
+```
+{variable}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc
+```
+
+Example:
+
+```
+lithk_AIS_BristolGlaciology_BISICLES_m001_standalone_f001_ctrl_proj_C001_2015-2100.nc
+```
+
+| Component          | CLI option            | Config key          | Example              |
+|--------------------|-----------------------|---------------------|----------------------|
+| `variable`         | (from variable table) |                     | `lithk`              |
+| `domain_id`        | `--ice-sheet`         | `ice_sheet`         | `AIS`                |
+| `source_id`        | `--source-id`         | `source_id`         | `BristolGlaciology`  |
+| `ism_id`           | `--ism-id`            | `ism_id`            | `BISICLES`           |
+| `ism_member_id`    | `--ism-member-id`     | `ism_member_id`     | `m001`               |
+| `esm_id`           | `--esm-id`            | `esm_id`            | `standalone`         |
+| `forcing_member_id`| `--forcing-member-id` | `forcing_member_id` | `f001`               |
+| `experiment`       | `--experiment`        | `experiment`        | `ctrl_proj`          |
+| `set_counter`      | `--set-counter`       | `set_counter`       | `C001`               |
+| `startyr-endyr`    | (from time axis)      |                     | `2015-2100`          |
+
+Note that frequency is **not** part of the ISMIP7 ISM submission filename.
 
 ### ISMIP7 flatten example
 
 ```bash
 bike-ismip7-postproc-flatten \
     --input  /data/standalone/output/ \
-    --output-dir /data/postproc/ \
+    --output-dir /data/ismip7/ \
     --exe-path /opt/bisicles/flatten2d.Linux.64.g++.gfortran.OPT.ex \
     --epsg 3031 \
+    --x0 -3072000.0 --y0 -3072000.0 \
     --level 0 \
     --ice-sheet AIS \
     --experiment ctrl_proj \
-    --model-id BISICLES \
-    --member-id r1 \
-    --frequency yr \
-    --reference-year 1950
+    --source-id BristolGlaciology \
+    --ism-id BISICLES \
+    --ism-member-id m001 \
+    --esm-id standalone \
+    --forcing-member-id f001 \
+    --set-counter C001 \
+    --contact-name "Your Name" \
+    --contact-email your.name@institution.ac.uk \
+    --reference-year 1850
 ```
 
 ### ISMIP7 diagnostics example
@@ -322,14 +371,19 @@ bike-ismip7-postproc-flatten \
 ```bash
 bike-ismip7-postproc-diagnostics \
     --input  /data/standalone/output/ \
-    --output-dir /data/postproc/ \
+    --output-dir /data/ismip7/ \
     --exe-path /opt/bisicles/diagnostics2d.Linux.64.g++.gfortran.OPT.ex \
     --ice-sheet AIS \
     --experiment ctrl_proj \
-    --model-id BISICLES \
-    --member-id r1 \
-    --frequency yr \
-    --reference-year 1950
+    --source-id BristolGlaciology \
+    --ism-id BISICLES \
+    --ism-member-id m001 \
+    --esm-id standalone \
+    --forcing-member-id f001 \
+    --set-counter C001 \
+    --contact-name "Your Name" \
+    --contact-email your.name@institution.ac.uk \
+    --reference-year 1850
 ```
 
 ### ISMIP7 config file
@@ -348,26 +402,73 @@ The config file uses `tool: flatten` or `tool: diagnostics` as usual; the
 The ISMIP7 mode can also be enabled explicitly in any config file by adding
 `ismip7_mode: true`, which then works with `bike-cmip7-postproc-run` too.
 
-### New CLI options (ISMIP7 commands only)
+### ISMIP7 CLI options (ISMIP7 commands only)
 
-**--model-id** / `model_id`  [default: "BISICLES"]
-    ISMIP7 model identifier written in the DRS filename and as a global attribute.
+**--source-id** / `source_id`  [required]
+    Modelling group name. No underscores, dots or special characters.
+    E.g. `"BristolGlaciology"`.
 
-**--member-id** / `member_id`  [default: "r1"]
-    ISMIP7 member identifier written in the DRS filename and as a global attribute.
+**--ism-id** / `ism_id`  [default: "BISICLES"]
+    ISM name and version. No underscores, dots or special characters.
+    E.g. `"BISICLES"` or `"BISICLESv3-2"`.
 
-### ISMIP7 DRS filename components
+**--ism-member-id** / `ism_member_id`  [default: "m001"]
+    ISM choice variant (mNNN format). Increment for each new initial state
+    or ice sheet model parameter choice.
 
-| Component  | Source                        | Example        |
-|------------|-------------------------------|----------------|
-| varname    | CMIP7/ISMIP7 variable name    | `lithk`        |
-| icesheet   | `--ice-sheet`                 | `AIS`          |
-| exp        | `--experiment`                | `ctrl_proj`    |
-| model      | `--model-id`                  | `BISICLES`     |
-| member     | `--member-id`                 | `r1`           |
-| freq       | `--frequency` (default `yr`)  | `yr`           |
-| startyr    | Minimum year in time axis     | `2015`         |
-| endyr      | Maximum year in time axis     | `2100`         |
+**--esm-id** / `esm_id`  [default: "standalone"]
+    CMIP ESM used to produce the forcing. Use `"standalone"` for idealised or
+    observed forcing. E.g. `"CESM2-WACCM"`, `"MRI-ESM2-0"`, `"ERA5"`.
+
+**--forcing-member-id** / `forcing_member_id`  [default: "f001"]
+    Forcing choice variant (fNNN format). Increment for each new downscaling
+    method or melt parameterisation choice.
+
+**--set-counter** / `set_counter`  [default: "C001"]
+    Set counter linking all files for a single run in the submission
+    spreadsheet. Use `Cnnn` for CORE, `Ennn` for ESM, `Pnnn` for PPE.
+
+**--group** / `group`  [default: same as source_id]
+    Modelling group name written as the ISMIP7 mandatory global attribute
+    `group`. Defaults to `source_id` when not set.
+
+**--contact-name** / `contact_name`  [required for submission]
+    Contact person name(s), written as global attribute `contact_name`.
+
+**--contact-email** / `contact_email`  [required for submission]
+    Contact person email(s), written as global attribute `contact_email`.
+
+### ISMIP7 grid origins and regridding
+
+The coordinates written into the output NetCDF must match the grid origin that
+was used when running BISICLES. All Bristol standalone simulations were run on
+the **standard BISICLES grid**, so those origins must be used here:
+
+```text
+Ice sheet  EPSG   x0 (standard BISICLES)  y0 (standard BISICLES)
+---------  ----   ----------------------  ----------------------
+GrIS       3413   -654650.0               -3385950.0
+AIS        3031   -3072000.0              -3072000.0
+```
+
+These are the default values used when `--x0`/`--y0` are not supplied, so in
+most cases you do not need to pass them explicitly.
+
+**The output from this tool will therefore be on the standard BISICLES grid,
+not the ISMIP7 standard grid.** A separate regridding step is required to interpolate
+the data onto the ISMIP7 standard grid before submission. The ISMIP7 standard
+grid origins are:
+
+```text
+Ice sheet  EPSG   x0 (ISMIP7 standard)  y0 (ISMIP7 standard)
+---------  ----   --------------------  --------------------
+GrIS       3413   -720000.0             -3450000.0
+AIS        3031   -3040000.0            -3040000.0
+```
+
+Do not pass the ISMIP7 standard origins to `--x0`/`--y0` unless your BISICLES
+simulation was actually configured to run on that grid — doing so would shift
+all data to the wrong geographic location.
 
 ## UKESM-specific notes
 

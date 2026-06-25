@@ -4,8 +4,8 @@
 # ISMIP7 DRS-named CF-compliant scalar timeseries NetCDF files.
 #
 # Output filenames follow the ISMIP7 DRS convention:
-#   {varname}_{icesheet}_{experiment}_{model_id}_{member_id}_{frequency}_{startyr}-{endyr}.nc
-# e.g.: lim_AIS_ctrl_proj_BISICLES_r1_yr_2015-2100.nc
+#   {varname}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc
+# e.g.: lim_AIS_BristolGlaciology_BISICLES_m001_standalone_f001_ctrl_proj_C001_2015-2100.nc
 #
 # Usage:
 #   bike-ismip7-postproc-run ismip7_diagnostics_defaults.yaml
@@ -53,16 +53,16 @@ exe_path: null
 # Time axis
 # ---------------------------------------------------------------------------
 
-# Reference year for the CF time axis (days since <reference_year>-01-01).
-# For ISMIP7 historical runs starting from 1950, set reference_year: 1950.
-# For ctrl_proj/future runs starting from 2015, set reference_year: 2015.
-reference_year: 1950
+# Reference year for the CF time axis.
+# ISMIP7 requires time:units = "days since 1850-01-01", so this must be 1850.
+reference_year: 1850
 
-# CF calendar (standalone BISICLES uses a standard Gregorian calendar).
-calendar: gregorian
+# CF calendar.  ISMIP7 requires "standard" (Gregorian-Julian as defined by UDUNITS).
+# Use "360_day" only for UKESM-coupled runs with a 360-day model calendar.
+calendar: standard
 
-# ISMIP7 output frequency written to global attributes and used in the DRS
-# output filename.  Defaults to 'yr' if not set.
+# ISMIP7 output frequency written to global attributes.
+# Not included in the ISMIP7 filename but retained as a metadata attribute.
 # Common values: yr, dec, mon
 frequency: yr
 
@@ -92,28 +92,60 @@ mask_no_end: 0
 
 
 # ---------------------------------------------------------------------------
-# ISMIP7 DRS metadata
+# ISMIP7 DRS filename components
+#
+# Output filename pattern:
+#   {variable}_{domain_id}_{source_id}_{ism_id}_{ism_member_id}_{esm_id}_{forcing_member_id}_{experiment}_{set_counter}_{startyr}-{endyr}.nc
 # ---------------------------------------------------------------------------
 
-# ISMIP7 model identifier — used in the output filename and as a global
-# attribute.  Set this to the name of your BISICLES configuration.
-model_id: "BISICLES"
+# Modelling group name.  No underscores, dots or special characters. [required]
+# Example: "BristolGlaciology"
+source_id: ""
 
-# ISMIP7 member/realisation identifier — used in the output filename.
-# Use 'r1' for a single deterministic run.
-member_id: "r1"
+# Ice sheet model name and version.  No underscores, dots or special characters.
+# Example: "BISICLES" or "BISICLESv3-2"
+ism_id: "BISICLES"
 
-# Ice sheet identifier.  [required]
+# ISM choice variant identifier (mNNN format).
+# Increment for each new initial state or ISM parameter choice.
+ism_member_id: "m001"
+
+# CMIP ESM used to produce forcing.  Use "standalone" for idealised/observed forcing.
+# Example: "CESM2-WACCM", "MRI-ESM2-0", "ERA5", "standalone"
+esm_id: "standalone"
+
+# Forcing choice variant identifier (fNNN format).
+# Increment for each new downscaling method or melt parameterisation.
+forcing_member_id: "f001"
+
+# Set counter (Cnnn for CORE, Ennn for ESM, Pnnn for PPE). [required]
+# Links all files for a single model run in the submission spreadsheet.
+# Example: "C001"
+set_counter: "C001"
+
+# Ice sheet identifier. [required]
 #   GrIS  — Greenland Ice Sheet
 #   AIS   — Antarctic Ice Sheet
 ice_sheet: ""
 
-# ISMIP7 experiment identifier.  [required]
-# Examples: ctrl_proj, historical, ssp126, ssp245, ssp585, 1pct, abrupt4x
+# ISMIP7 experiment identifier. [required]
+# Examples: ctrl_proj, historical, ssp126, ssp245, ssp370, ssp585
 experiment: ""
 
-# Institution name for global attributes.
+
+# ---------------------------------------------------------------------------
+# ISMIP7 mandatory global attributes
+# ---------------------------------------------------------------------------
+
+# Modelling group name (written as global attribute 'group').
+# Can be left blank to default to source_id.
 institution: ""
+
+# Contact person name(s). [required for submission]
+contact_name: ""
+
+# Contact person email(s). [required for submission]
+contact_email: ""
 
 # Model source description.
 source: "BISICLES adaptive mesh refinement ice sheet model"
@@ -122,7 +154,6 @@ source: "BISICLES adaptive mesh refinement ice sheet model"
 #
 # Example ISMIP7-style attributes:
 #   extra_attrs:
-#     contact: your.name@institution.ac.uk
 #     references: "https://doi.org/10.5194/gmd-xx-xxxx-xxxx"
 #     comment: "Standalone BISICLES run for ISMIP7"
 extra_attrs: null
