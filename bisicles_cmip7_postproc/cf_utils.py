@@ -205,6 +205,43 @@ _DAYS_PER_YEAR = {
     "360_day":   360.0,   # 360-day calendar used by UKESM
 }
 
+
+def exact_days_since(year, month, day, ref_year=1850, calendar="standard"):
+    """
+    Compute days from ``ref_year``-01-01 to ``year``-``month``-``day`` using
+    proper calendar arithmetic rather than the 365.25-day approximation.
+
+    Supports ``"standard"`` / ``"gregorian"`` (proleptic Gregorian) and
+    ``"360_day"`` calendars.
+
+    Parameters
+    ----------
+    year, month, day : int
+        Target date.
+    ref_year : int
+        Reference epoch year (default 1850).
+    calendar : str
+        CF calendar name.  ``"gregorian"`` is accepted as a synonym for
+        ``"standard"``.
+
+    Returns
+    -------
+    float
+        Exact integer day count as a float, suitable for use as a CF time value.
+    """
+    cal = "standard" if calendar == "gregorian" else calendar
+
+    if cal == "360_day":
+        return float((year - ref_year) * 360 + (month - 1) * 30 + (day - 1))
+
+    def _is_leap(y):
+        return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+
+    total = sum(366 if _is_leap(y) else 365 for y in range(ref_year, year))
+    _dim = [0, 31, 29 if _is_leap(year) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    total += sum(_dim[:month]) + (day - 1)
+    return float(total)
+
 def years_to_days(time_years, reference_year=1850, calendar="gregorian"):
     """
     Convert BISICLES simulation time (in years) to days since a reference year.
@@ -359,7 +396,8 @@ def get_crs_variable_attrs(epsg_code, x0=None, y0=None):
     return attrs
 
 
-def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian", dtype="f8"):
+def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian",
+                      dtype="f8", time_days=None):
     """
     Add a CF-compliant time variable to an open NetCDF4 Dataset.
 
@@ -368,7 +406,7 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian",
     ds : netCDF4.Dataset
         Open dataset to write into (must already have a 'time' dimension).
     time_years : array-like
-        Time values in simulation years.
+        Time values in simulation years.  Ignored when *time_days* is given.
     reference_year : int
         Reference epoch year.
     calendar : str
@@ -376,13 +414,23 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian",
     dtype : str
         NetCDF data type for the time variable.  Use ``"f8"`` (double,
         default) for CMIP7/UKESM output; ``"f4"`` (single) for ISMIP7.
+    time_days : array-like, optional
+        Pre-computed day values (days since ``reference_year``-01-01).
+        When supplied, *time_years* is ignored and the 365.25-day
+        approximation is bypassed — use this for calendar-exact timestamps
+        (e.g. ISMIP7 YYYY-07-01 / YYYY-01-01 requirements).
 
     Returns
     -------
     time_var : netCDF4.Variable
         The created time variable.
     """
-    days, units, calendar = years_to_days(time_years, reference_year, calendar)
+    if time_days is None:
+        days, units, calendar = years_to_days(time_years, reference_year, calendar)
+    else:
+        days = np.asarray(time_days, dtype=float)
+        units = f"days since {reference_year:04d}-01-01 00:00:00"
+        calendar = "standard" if calendar == "gregorian" else calendar
     time_var = ds.createVariable("time", dtype, ("time",))
     time_var[:] = days.astype(np.float32) if dtype == "f4" else days
     time_var.standard_name = "time"
@@ -393,7 +441,8 @@ def add_time_variable(ds, time_years, reference_year=1850, calendar="gregorian",
     return time_var
 
 
-def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="gregorian", dtype="f8"):
+def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="gregorian",
+                    dtype="f8", start_days=None, end_days=None):
     """
     Add a ``time_bnds`` variable to an open NetCDF4 Dataset.
 
@@ -405,9 +454,11 @@ def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="g
     ds : netCDF4.Dataset
         Open dataset that already has a ``time`` dimension and variable.
     start_years : array-like
-        Start of each averaging period in simulation years.
+        Start of each averaging period in simulation years.  Ignored when
+        *start_days* is given.
     end_years : array-like
-        End of each averaging period in simulation years.
+        End of each averaging period in simulation years.  Ignored when
+        *end_days* is given.
     reference_year : int
         Reference epoch year (must match the ``time`` variable).
     calendar : str
@@ -416,16 +467,25 @@ def add_time_bounds(ds, start_years, end_years, reference_year=1850, calendar="g
     dtype : str
         NetCDF data type.  Use ``"f8"`` (double, default) for CMIP7/UKESM
         output; ``"f4"`` (single) for ISMIP7.
+    start_days, end_days : array-like, optional
+        Pre-computed day values for the start and end of each averaging
+        period.  When supplied, *start_years* / *end_years* are ignored.
     """
-    start_days, _, _ = years_to_days(np.asarray(start_years, dtype=float), reference_year, calendar)
-    end_days, _, _ = years_to_days(np.asarray(end_years, dtype=float), reference_year, calendar)
+    if start_days is None:
+        sd, _, _ = years_to_days(np.asarray(start_years, dtype=float), reference_year, calendar)
+    else:
+        sd = np.asarray(start_days, dtype=float)
+    if end_days is None:
+        ed, _, _ = years_to_days(np.asarray(end_years, dtype=float), reference_year, calendar)
+    else:
+        ed = np.asarray(end_days, dtype=float)
 
     if "bnds" not in ds.dimensions:
         ds.createDimension("bnds", 2)
 
     bnds_var = ds.createVariable("time_bnds", dtype, ("time", "bnds"))
-    bnds_var[:, 0] = start_days
-    bnds_var[:, 1] = end_days
+    bnds_var[:, 0] = sd
+    bnds_var[:, 1] = ed
 
     # Link the time variable to its bounds
     ds.variables["time"].bounds = "time_bnds"

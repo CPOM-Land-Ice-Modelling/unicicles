@@ -319,6 +319,25 @@ def _build_flatten_parser():
         ),
     )
     p.add_argument(
+        "--x_min", type=float, default=None, dest="x_min",
+        help= ("x coordinate of the lower-left corner of the output domain"))           
+    p.add_argument(
+        "--x_max", type=float, default=None, dest="x_max",
+        help= ("x coordinate of the upper-right corner of the output domain"))
+    p.add_argument(
+        "--y_min", type=float, default=None, dest="y_min",
+        help= ("y coordinate of the lower-left corner of the output domain")) 
+    p.add_argument(
+        "--y_max", type=float, default=None, dest="y_max",
+        help= ("x coordinate of the upper right corner of the output domain")) 
+    p.add_argument(
+        "--nx", type=int, default=None, dest="nx",
+        help= ("ouput grid x dimension")) 
+    p.add_argument(
+        "--ny", type=int, default=None, dest="ny",
+        help= ("ouput grid y dimension")) 
+
+    p.add_argument(
         "--cmip7-only", action="store_true", dest="cmip7_only",
         help=(
             "Only write CMIP7-standard variables. By default, unmapped BISICLES "
@@ -379,6 +398,14 @@ def run_flatten_cli(args=None):
     if ns.input is None:
         parser.error("--input is required (or set 'input' in a --config file)")
 
+    grid_spec = None
+    grid_spec_test = (ns.x_min, ns.x_max, ns.nx, ns.y_min, ns.y_max, ns.ny)
+    if any(grid_spec_test):
+        if not all(grid_spec_test):
+            parser.error("must specify all of --x_min, --x_max, --nx, --y_min, --y_max, --ny, or none")
+        else:
+            grid_spec = grid_spec_test
+
     from .flatten import process_plotfile, process_directory
 
     nc_kwargs = dict(
@@ -413,6 +440,7 @@ def run_flatten_cli(args=None):
             ice_density=ns.ice_density,
             water_density=ns.water_density,
             h_min=ns.h_min,
+            grid_spec=grid_spec,
             verbose=not ns.quiet,
             **nc_kwargs,
         )
@@ -432,6 +460,7 @@ def run_flatten_cli(args=None):
             water_density=ns.water_density,
             h_min=ns.h_min,
             keep_intermediate=ns.keep_intermediate,
+            grid_spec=grid_spec,
             verbose=not ns.quiet,
             **nc_kwargs,
         )
@@ -722,6 +751,16 @@ def run_ismip7_flatten_cli(args=None):
         str(input_path) if input_path.is_dir() else str(input_path.parent)
     )
 
+    
+    grid_spec=None
+    grid_spec_test = (ns.x_min, ns.x_max, ns.nx, ns.y_min, ns.y_max, ns.ny)
+    if any(grid_spec_test):
+       if not all(grid_spec_test):
+           parser.error("must specify all of --x_min, --x_max, nx, --y_min, --y_max, ny, or none")
+       else:
+           grid_spec = grid_spec_test
+
+           
     if input_path.is_dir():
         process_directory(
             directory=input_path,
@@ -732,6 +771,7 @@ def run_ismip7_flatten_cli(args=None):
             epsg_code=ns.epsg_code,
             x0=ns.x0,
             y0=ns.y0,
+            grid_spec=grid_spec,
             reference_year=ns.reference_year,
             calendar=ns.calendar,
             cmip7_only=ns.cmip7_only,
@@ -750,6 +790,7 @@ def run_ismip7_flatten_cli(args=None):
             epsg_code=ns.epsg_code,
             x0=ns.x0,
             y0=ns.y0,
+            grid_spec=grid_spec,
             reference_year=ns.reference_year,
             calendar=ns.calendar,
             cmip7_only=ns.cmip7_only,
@@ -797,6 +838,7 @@ def main_diagnostics():
 
 
 def main_flatten():
+    print ("main_flatten")
     run_flatten_cli()
 
 

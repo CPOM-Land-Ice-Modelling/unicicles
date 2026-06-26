@@ -159,6 +159,7 @@ _FLATTEN_KEYS = {
     "reference_year", "calendar",
     "cmip7_only", "keep_intermediate",
     "ice_density", "water_density", "h_min",
+    "x_min", "x_max", "nx", "y_min", "y_max", "ny", "grid_spec",
     "verbose",
     # nc_kwargs (passed through to write_cmip7_per_variable_netcdfs)
     "institution", "source", "experiment", "variant_label", "ice_sheet",
@@ -206,6 +207,17 @@ def _normalise_flatten_cfg(cfg):
     for key in ("cmip7_only", "keep_intermediate", "verbose", "ismip7_mode"):
         if key in cfg:
             cfg[key] = bool(cfg[key])
+
+    # Assemble grid_spec tuple from individual x_min/x_max/nx/y_min/y_max/ny keys
+    # (these come from YAML config; CLI assembles grid_spec before calling process_*)
+    _gs_keys = ("x_min", "x_max", "nx", "y_min", "y_max", "ny")
+    _gs_parts = tuple(cfg.pop(k, None) for k in _gs_keys)
+    if any(v is not None for v in _gs_parts):
+        if not all(v is not None for v in _gs_parts):
+            raise ValueError(
+                "Must specify all of x_min, x_max, nx, y_min, y_max, ny, or none of them"
+            )
+        cfg["grid_spec"] = _gs_parts
 
     return cfg
 

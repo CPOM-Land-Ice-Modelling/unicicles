@@ -52,6 +52,7 @@ giving a multi-year timeseries per variable.
 import os
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +74,7 @@ from .cf_utils import (
     UKESM_GRID_ORIGINS,
     get_global_attributes,
     period_to_cmip_frequency,
+    exact_days_since,
     add_time_variable,
     add_time_bounds,
     add_xy_variables,
@@ -82,6 +84,10 @@ from .cf_utils import (
     _ismip7_drs_filename,
 )
 from .filename_parser import parse_bisicles_filename
+
+# Standalone BISICLES plot file patterns (no UKESM suite ID in the name)
+_RE_STANDALONE_CFMEAN   = re.compile(r'plot\.CF\.\d+\.2d\.hdf5$',  re.IGNORECASE)
+_RE_STANDALONE_SNAPSHOT = re.compile(r'plot\.\d+\.2d\.hdf5$',       re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +230,38 @@ def compute_flotation_mask(
     return mask
 
 
+
+def _regrid(flat_data, xygrid):
+    """
+    Interpolate flat_data fields from the grid defined by flat_data['x'],
+    flat_data['y'] to the grid defined by x, y = xygrid.
+
+    Points on the target grid that fall outside the source domain are filled
+    with NaN; the caller is responsible for replacing these with a fill value.
+    """
+
+    from scipy.interpolate import RegularGridInterpolator
+
+    result = {}
+    result["x"], result["y"] = xygrid
+    result["time"] = flat_data["time"]
+    result["time_units"] = flat_data["time_units"]
+    result["epsg"] = flat_data["epsg"]
+    result["variables"] = {}
+    xy = np.meshgrid(result["y"], result["x"])
+
+    for key, var in flat_data["variables"].items():
+        rg = RegularGridInterpolator(
+            (flat_data["y"], flat_data["x"]),
+            var,
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+        result["variables"][key] = rg(xy).T
+
+    return result
+    
+
 # ---------------------------------------------------------------------------
 # Reading the flatten tool output and applying CMIP7 conversions
 # ---------------------------------------------------------------------------
@@ -269,8 +307,17 @@ def _read_flatten_nc(nc_path):
                 except ValueError:
                     pass
 
+        # Time bounds — read if the flatten tool wrote them (CF output files)
+        for _bnds_name in ("time_bnds", "time_bounds"):
+            if _bnds_name in ds.variables:
+                _bnds = np.asarray(ds.variables[_bnds_name][:]).ravel()
+                if len(_bnds) >= 2:
+                    result["time_start"] = float(_bnds[0])
+                    result["time_end"]   = float(_bnds[-1])
+                break
+
         # Data variables (skip coordinate/metadata variables)
-        skip = {"x", "y", "time", "crs", "level"}
+        skip = {"x", "y", "time", "time_bnds", "time_bounds", "crs", "level"}
         for name in ds.variables:
             if name in skip:
                 continue
@@ -483,6 +530,7 @@ def write_cmip7_per_variable_netcdfs(
     group="",
     contact_name="",
     contact_email="",
+    grid_spec=None,
 ):
     """
     Write one CMIP7/CF-compliant NetCDF per variable from a collection of
@@ -610,11 +658,32 @@ def write_cmip7_per_variable_netcdfs(
             t_end = file_info.end_time_years
             tcm = file_info.cell_methods_time
         else:
-            t = flatten_data.get("time")
-            is_mean = False
-            t_start = None
-            t_end = None
-            tcm = "time: point"
+            t_raw = flatten_data.get("time") or 0.0
+            is_cf_mean = flatten_data.get("_is_cf_mean", False)
+            is_mean = is_cf_mean
+            if is_cf_mean:
+                # Use time bounds from the flatten NC if the flatten tool wrote them,
+                # otherwise infer the averaging period from the time value:
+                #   N.5  → mid-year convention: averaging year N, period [N, N+1]
+                #   N.0  → end-of-period convention: averaging year N-1, period [N-1, N]
+                if "time_start" in flatten_data and "time_end" in flatten_data:
+                    t_start = flatten_data["time_start"]
+                    t_end   = flatten_data["time_end"]
+                else:
+                    frac = t_raw - int(t_raw)
+                    if abs(frac - 0.5) < 0.1:
+                        year = int(t_raw)           # midpoint: 2015.5 → year 2015
+                    else:
+                        year = int(round(t_raw)) - 1  # end-of-period: 2016.0 → year 2015
+                    t_start = float(year)
+                    t_end   = float(year + 1)
+                t = 0.5 * (t_start + t_end)
+                tcm = "time: mean"
+            else:
+                t = t_raw
+                t_start = None
+                t_end = None
+                tcm = "time: point"
 
         times_list.append(t)
         is_time_mean_list.append(is_mean)
@@ -675,6 +744,46 @@ def write_cmip7_per_variable_netcdfs(
     has_time_bounds = any(is_mean_sorted)
     time_arr = np.asarray(times_sorted)
 
+    # -----------------------------------------------------------------------
+    # Compute ISMIP7-correct time coordinates using exact calendar arithmetic:
+    #   Annual means  → timestamp = YYYY-07-01, bounds = [YYYY-01-01, (YYYY+1)-01-01]
+    #   Snapshots     → timestamp = YYYY-01-01 (integer year rounded)
+    # This avoids the ±1-3 day error in the 365.25-days/year approximation.
+    # -----------------------------------------------------------------------
+    _cal_key = "standard" if calendar == "gregorian" else calendar
+
+    def _to_exact_days(t, is_mean, t_start, t_end):
+        """Return (time_days, bound_start_days, bound_end_days) for one timestep."""
+        if is_mean and t_start is not None and t_end is not None:
+            s = round(t_start)
+            e = round(t_end)
+            if abs(t_start - s) < 0.01 and abs(t_end - e) < 0.01 and e - s == 1:
+                # Annual mean with integer Jan-1 boundaries → exact July-1 timestamp
+                return (
+                    exact_days_since(int(s), 7, 1, reference_year, _cal_key),
+                    exact_days_since(int(s), 1, 1, reference_year, _cal_key),
+                    exact_days_since(int(e), 1, 1, reference_year, _cal_key),
+                )
+        # Snapshot or non-annual mean → round to nearest integer year, use Jan-1
+        yr = int(round(t))
+        d = exact_days_since(yr, 1, 1, reference_year, _cal_key)
+        return d, d, d  # bounds ignored for snapshots
+
+    _exact_t  = []
+    _exact_bs = []
+    _exact_be = []
+    for _i in range(len(times_sorted)):
+        _td, _bs, _be = _to_exact_days(
+            times_sorted[_i], is_mean_sorted[_i],
+            t_start_sorted[_i], t_end_sorted[_i],
+        )
+        _exact_t.append(_td)
+        _exact_bs.append(_bs)
+        _exact_be.append(_be)
+    _exact_t  = np.array(_exact_t)
+    _exact_bs = np.array(_exact_bs) if has_time_bounds else None
+    _exact_be = np.array(_exact_be) if has_time_bounds else None
+
     def _sort(arr_list):
         """Return arr_list reordered by sort_idx."""
         return [arr_list[i] for i in sort_idx]
@@ -719,6 +828,35 @@ def write_cmip7_per_variable_netcdfs(
     _group = group or source_id
     _crs_str = f"epsg:{epsg}" if (ismip7_mode and epsg is not None) else ""
 
+    # Derive human-readable grid description and nominal resolution from x/y spacing
+    _dx = abs(float(x[1] - x[0])) if len(x) > 1 else 0.0
+    _dy = abs(float(y[1] - y[0])) if len(y) > 1 else 0.0
+    _res_m = max(_dx, _dy)
+    if _res_m >= 1000.0:
+        _res_str = f"{_res_m / 1000:.4g} km"
+    else:
+        _res_str = f"{_res_m:.4g} m"
+
+    _epsg_names = {
+        3031: "Antarctic Polar Stereographic",
+        3413: "NSIDC Sea Ice Polar Stereographic North",
+    }
+    _proj_name = _epsg_names.get(epsg, f"EPSG:{epsg}") if epsg is not None else "unknown projection"
+    _grid_desc = f"{_proj_name} (EPSG:{epsg}), {_res_str}" if epsg is not None else ""
+
+    # Build regrid provenance metadata when a target grid was supplied
+    _extra_history = ""
+    _grid_label = "gn"
+    if grid_spec is not None:
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        _extra_history = (
+            f"Regridded to x=[{x_min},{x_max}] nx={nx}, "
+            f"y=[{y_min},{y_max}] ny={ny} "
+            f"using scipy.interpolate.RegularGridInterpolator (linear)"
+        )
+        if not ismip7_mode:
+            _grid_label = "gr"
+
     global_attrs = get_global_attributes(
         institution=institution,
         source=source,
@@ -734,6 +872,10 @@ def write_cmip7_per_variable_netcdfs(
         contact_name=contact_name,
         contact_email=contact_email,
         crs=_crs_str,
+        extra_history=_extra_history,
+        grid_label=_grid_label,
+        grid=_grid_desc,
+        nominal_resolution=_res_str,
     )
     if ismip7_mode and ism_id:
         global_attrs["model"] = ism_id
@@ -762,11 +904,14 @@ def write_cmip7_per_variable_netcdfs(
         ds.createDimension("x", nx_size)
         add_xy_variables(ds, x, y, epsg_code=epsg)
         add_time_variable(ds, time_arr, reference_year=reference_year,
-                          calendar=calendar, dtype=_time_dtype)
+                          calendar=calendar, dtype=_time_dtype,
+                          time_days=_exact_t)
         if has_time_bounds:
             add_time_bounds(ds, _tb_start, _tb_end,
                             reference_year=reference_year, calendar=calendar,
-                            dtype=_time_dtype)
+                            dtype=_time_dtype,
+                            start_days=_exact_bs,
+                            end_days=_exact_be)
         if epsg is not None:
             add_crs_variable(ds, epsg, x0=x0, y0=y0)
         if has_latlon:
@@ -938,6 +1083,7 @@ def _flatten_plot_file(
     level=0,
     x0=None,
     y0=None,
+    xygrid=None,
     keep_intermediate=False,
     intermediate_nc=None,
     verbose=False,
@@ -982,6 +1128,13 @@ def _flatten_plot_file(
 
     file_info = parse_bisicles_filename(plot_file)
 
+    # For standalone BISICLES files that don't match UKESM naming, detect
+    # whether this is a CF time-mean file (plot.CF.NNNNNN.2d.hdf5) or a
+    # snapshot (plot.NNNNNN.2d.hdf5) from the filename alone.
+    _standalone_cf = (
+        file_info is None and _RE_STANDALONE_CFMEAN.search(plot_file.name) is not None
+    )
+
     try:
         if verbose:
             print(f"  Flattening {plot_file.name} onto level {level}...")
@@ -990,9 +1143,15 @@ def _flatten_plot_file(
         if verbose:
             print(f"  Reading flattened data...")
         flatten_data = _read_flatten_nc(tmp_nc)
+        if xygrid is not None:
+            flatten_data = _regrid(flatten_data, xygrid)
     finally:
         if _tmp_path is not None and _tmp_path.exists():
             os.unlink(_tmp_path)
+
+    # Store the CF-mean flag so write_cmip7_per_variable_netcdfs can set
+    # correct time encoding without needing to re-examine the filename.
+    flatten_data["_is_cf_mean"] = _standalone_cf
 
     return flatten_data, file_info
 
@@ -1016,6 +1175,7 @@ def process_plotfile(
     water_density=1028.0,
     h_min=1.0,
     keep_intermediate=False,
+    grid_spec=None,
     verbose=True,
     **nc_kwargs,
 ):
@@ -1046,6 +1206,10 @@ def process_plotfile(
         Y-coordinate of the lower-left corner of the domain (metres).
         Defaults to the standard BISICLES value for the given ``epsg_code``
         (see :data:`cf_utils.UKESM_GRID_ORIGINS`).
+     grid_spec : tuple (x_min, x_max, nx, y_min, y_max, ny)
+        specify an output grid on different to the BISICLES grid but on the same
+        projection . This will be a regular nx by ny grid,
+        with x_min <= x <= x_max & similar for y
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1110,12 +1274,20 @@ def process_plotfile(
     if verbose:
         print(f"Flattening {plot_file.name} onto level {level}...")
 
+    xygrid = None
+    if grid_spec is not None:
+        print (f'output grid  x_min, x_max, nx, y_min, y_max, ny = {grid_spec}')
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        xygrid = np.linspace(x_min, x_max, nx), np.linspace(y_min, y_max, ny)
+
+        
     flatten_data, _ = _flatten_plot_file(
         plot_file,
         exe_path=exe_path,
         level=level,
         x0=x0,
         y0=y0,
+        xygrid=xygrid,
         keep_intermediate=keep_intermediate,
         intermediate_nc=intermediate_nc,
         verbose=verbose,
@@ -1139,6 +1311,7 @@ def process_plotfile(
         water_density=water_density,
         h_min=h_min,
         source_files=file_info.filename_pattern if file_info is not None else plot_file.name,
+        grid_spec=grid_spec,
         **nc_kwargs,
     )
 
@@ -1157,6 +1330,7 @@ def process_directory(
     epsg_code=None,
     x0=None,
     y0=None,
+    grid_spec=None,
     reference_year=1850,
     calendar="gregorian",
     cmip7_only=False,
@@ -1194,6 +1368,10 @@ def process_directory(
     y0 : float, optional
         Y-coordinate of the lower-left corner of the domain (metres).
         Defaults to the standard BISICLES value for the given ``epsg_code``.
+    grid_spec : tuple (x_min, x_max, nx, y_min, y_max, ny)
+        specify an output grid on different to the BISICLES grid but on the same
+        projection . This will be a regular nx by ny grid,
+        with x_min <= x <= x_max & similar for y
     reference_year : int
         Reference year for the CF time axis.
     calendar : str
@@ -1244,6 +1422,13 @@ def process_directory(
 
     # Collect flattened data from all plot files before writing
     all_data = []
+
+    xygrid = None
+    if grid_spec is not None:
+        print (f'output grid  x_min, x_max, nx, y_min, y_max, ny = {grid_spec}')
+        x_min, x_max, nx, y_min, y_max, ny = grid_spec
+        xygrid = np.linspace(x_min, x_max, nx), np.linspace(y_min, y_max, ny)
+
     for i, pf in enumerate(plot_files):
         if verbose:
             print(f"  [{i+1}/{len(plot_files)}] Flattening {pf.name}...")
@@ -1259,6 +1444,7 @@ def process_directory(
             level=level,
             x0=x0,
             y0=y0,
+            xygrid=xygrid,
             verbose=False,
         )
         all_data.append((flatten_data, file_info))
@@ -1282,6 +1468,7 @@ def process_directory(
             (fi.filename_pattern for _, fi in all_data if fi is not None),
             plot_files[0].name if plot_files else None,
         ),
+        grid_spec=grid_spec,
         **nc_kwargs,
     )
 
