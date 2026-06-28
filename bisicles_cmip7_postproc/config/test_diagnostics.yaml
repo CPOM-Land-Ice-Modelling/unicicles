@@ -1,0 +1,9 @@
+tool: diagnostics
+
+input: /home/tm17544/Data/cmip7_postproc_testing/
+
+output_dir: /home/tm17544/Data/cmip7_postproc_testing/
+
+plot_pattern: "*plot-GrIS.hdf5"
+
+calendar: 360_day

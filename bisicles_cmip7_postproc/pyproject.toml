@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bisicles-cmip7-postproc"
+version = "0.1.0"
+description = "Post-processing of BISICLES ice sheet model output into CF/CMIP7-compliant NetCDF"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "netCDF4",
+]
+
+[project.optional-dependencies]
+yaml   = ["pyyaml"]   # recommended for YAML config files; JSON works without it
+geo    = ["pyproj"]   # required for 2-D lat/lon auxiliary coordinates (CF/CMOR compliance)
+regrid = ["scipy"]    # required for regridding onto a target grid (--x_min/--x_max/etc.)
+
+[project.scripts]
+bike-cmip7-postproc-diagnostics  = "bisicles_cmip7_postproc.cli:main_diagnostics"
+bike-cmip7-postproc-flatten      = "bisicles_cmip7_postproc.cli:main_flatten"
+bike-cmip7-postproc-run          = "bisicles_cmip7_postproc.cli:main_run"
+bike-ismip7-postproc-diagnostics = "bisicles_cmip7_postproc.cli:main_ismip7_diagnostics"
+bike-ismip7-postproc-flatten     = "bisicles_cmip7_postproc.cli:main_ismip7_flatten"
+bike-ismip7-postproc-run         = "bisicles_cmip7_postproc.cli:main_ismip7_run"
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["bisicles_cmip7_postproc*"]
+
+[tool.setuptools.package-data]
+bisicles_cmip7_postproc = ["config/*.yaml"]
