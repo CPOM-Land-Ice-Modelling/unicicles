@@ -30,15 +30,12 @@ def read_ism_nc(nc_file):
 def read_atm_nc(nc_file):
     
     nc_um_in = Dataset(nc_file,'r')
-    ilo, ihi = 148, 188
-    jlo, jhi = 119, 140
-    ilo, ihi = 0, -1
-    jlo, jhi = 0, -1
-    grid = Uniform2DGrid(nc_um_in['longitude'][ilo:ihi].data,
-                            nc_um_in['latitude'][jlo:jhi].data)
+
+    grid = Uniform2DGrid(nc_um_in['longitude'][:].data,
+                            nc_um_in['latitude'][:].data)
 
     def prep_um(arr):
-        return arr[:,jlo:jhi,ilo:ihi]
+        return arr[...]
     
     area = prep_um(nc_um_in['tile_surface_area'])
     spy = 3600*360*24
@@ -231,32 +228,38 @@ if plot:
     plt.savefig('um_to_coupler.png')
 #%% downscaling & upscaling
 
-t = time()
+
 
 delta_t = 1.0 # typical?
-
+print('---')
+print ('GRIS downscaling')
+t = time()
+#smb_um = np.ma.masked_array( np.where(smb_um.data > 0.0, smb_um.data, 0.0), smb_um.mask)
 smb_gris, stemp_gris, delta_snow_gris, shflx_gris \
     = atm_to_ism(smb_um, stemp_um, snow_um, shflx_um,
                  topo_um, area_um, grid_um,
                  topo_gris, thk_gris, frac_gris, mask_gris, grid_gris,
-                 up_tr_gris, down_tr_gris, delta_t)
-
-print(time() - t)
+                 up_tr_gris, down_tr_gris, delta_t, conservation=True)
+print(f'wall time {time() - t}')
+print('---')
 
 if plot:
     plot_ism_coupler_outputs(grid_gris, smb_gris, stemp_gris, 
                              delta_snow_gris, shflx_gris, up_tr_gris)
     plt.savefig('coupler_to_bike_gris.png')
 
-t = time()
 
+print('---')
+print ('AIS downscaling')
+t = time()
 smb_ais, stemp_ais, delta_snow_ais, shflx_ais \
     = atm_to_ism(smb_um, stemp_um, snow_um, shflx_um,
                  topo_um, area_um, grid_um,
                  topo_ais, thk_ais, frac_ais, mask_ais, grid_ais,
                  up_tr_ais, down_tr_ais, delta_t)
     
-print(time() - t)
+print(f'wall time {time() - t}')
+
 
 if plot:
     plot_ism_coupler_outputs(grid_ais, smb_ais, stemp_ais, 
@@ -267,9 +270,11 @@ if plot:
 um_shape = smb_um.shape
 frac_um = np.full(um_shape, 0.0)
 
+
+
+print('---')
+print ('GRIS upscaling')
 t = time()
-
-
 frac_um, topo_um, delta_snow_um, hlfx_um, calv_um, \
     = ism_to_atm(topo_max, area_um, grid_um,  
                      frac_um, snow_um, shflx_um, calv_um, topo_um,
@@ -278,11 +283,13 @@ frac_um, topo_um, delta_snow_um, hlfx_um, calv_um, \
                      mask_gris, grid_gris,
                      up_tr_gris, down_tr_gris)
 
-print(time() - t)
+print(f'wall time {time() - t}')
 
 
+
+print('---')
+print ('AIS upscaling')
 t = time()
-
 frac_um, topo_um, delta_snow_um, hlfx_um, calv_um, \
     = ism_to_atm(topo_max, area_um, grid_um,  
                      frac_um, snow_um, shflx_um, calv_um, topo_um,
@@ -290,8 +297,7 @@ frac_um, topo_um, delta_snow_um, hlfx_um, calv_um, \
                      shflx_ais, delta_snow_ais, calv_ais,
                      mask_ais, grid_ais,
                      up_tr_ais, down_tr_ais)
-
-print(time() - t)
+print(f'wall time {time() - t}')
 
 
 if plot:
