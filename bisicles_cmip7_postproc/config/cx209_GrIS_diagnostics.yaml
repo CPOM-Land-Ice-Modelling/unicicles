@@ -1,0 +1,32 @@
+tool: diagnostics
+
+input: /gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/raw_data/cx209/icesheet
+
+output_dir: /gws/ssde/j25b/terrafirma/tm17544/TerraFIRMA_overshoots/raw_data/cx209/cmor
+
+plot_pattern: "*plot-GrIS.hdf5"
+
+exe_path: /home/users/tm17544/Code/BISICLES/bisicles-uob/code/filetools/diagnostics2d.Linux.64.c++.gfortran.DEBUG.OPT.GNU.ex
+
+calendar: 360_day
+
+extra_attrs:
+  experiment_id: "Up-8GtC"
+  mo_runid: "u-cx209"
+  activity_id: "TerraFIRMA"
+  institution: "Met Office Hadley Centre, Fitzroy Road, Exeter, Devon, EX1 3PB, UK"
+  institution_id: "MOHC"
+  mip_era: "GCModelDev"
+  source_id: "eUKESM1-1-ice-N96ORCA1 (2024)"
+  source_type: "AOGCM ISM"
+  forcing_index: 1
+  initialization_index: 1
+  physics_index: 1
+  realization_index: 1
+  branch_method: "no parent"
+  further_info_url: "none"
+  product: "model-output"
+  license: "Open Government License v3"
+  data_specs_version: "GCModelDev v0.0.17"
+  grid: "Native Polar Stereographic grid"
+  variant_label: "r1i1p1f1"

@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Oct 30 16:13:44 2025
+
+@author: ggslc
+"""
+
+import numpy as np
+from transformation import cell_id, missing
+
+
+def subset_ec(topo, topo_max, ec):
+    """Identify grid points within a specific elevation class.
+    
+    Creates a boolean mask for grid points whose surface elevation falls
+    within the specified elevation class boundaries.
+    
+    Parameters
+    ----------
+    topo : ndarray
+        Surface elevation values, any shape.
+    topo_max : ndarray
+        Sorted elevation class boundaries (1D). Class ec spans
+        [topo_max[ec], topo_max[ec+1]).
+    ec : int
+        Elevation class index.
+    
+    Returns
+    -------
+    ndarray (bool)
+        Boolean mask where True indicates points in elevation class ec.
+    """
+    return (topo < topo_max[ec+1]) & (topo >= topo_max[ec])
+
+
+
+def local_to_global_cell_agg(field, topo, mask, topo_max, indx):
+    """Aggregate field values within a global grid cell by elevation class.
+    
+    Computes sums and counts of field values across elevation classes for a
+    single global grid cell. Used as a helper for upscaling operations.
+    
+    Parameters
+    ----------
+    field : ndarray
+        2D field on local grid.
+    topo : ndarray
+        2D surface elevation on local grid.
+    mask : ndarray
+        Boolean mask of valid cells on local grid.
+    topo_max : ndarray
+        1D array of elevation class boundaries.
+    indx : ndarray (bool)
+        Boolean index array for cells belonging to this global cell.
+    
+    Returns
+    -------
+    field_sum : ndarray
+        Sum of field values in each elevation class, shape (nec,).
+    field_count : ndarray
+        Count of valid points in each elevation class, shape (nec,).
+    field_count_col : int
+        Total count of valid points in the column.
+    """
+    nec = len(topo_max) - 1  # 0,z1,z2,,,,zn
+    field_sum = np.zeros(nec)
+    field_count = np.zeros(nec)
+    ts = topo[indx]
+    tf = field[indx]
+    field_count_col = len(tf)
+    for ec in range(0, nec):
+        kndx = subset_ec(ts, topo_max, ec)
+        t = tf[kndx]
+        field_sum[ec] = np.sum(t)
+        field_count[ec] = len(t)
+
+    return field_sum, field_count, field_count_col
+
+
+def mean_to_global_mec(fields, col_means, topo, mask, topo_max, local_to_global_map,
+                       global_shape, missing_val = missing):
+    """
+
+    Compute the means of 2D fields on the global 3D grid.
+    Cell values will be non-zero where the 2D surface elevation (topo)
+    intersects the cell. Cell vertical boundaries are defined
+    by topo_max
+    
+    There is a substantial effiency benefit to calling 
+    once with a list of n fields than n times with 1 field 
+
+    Parameters
+    ----------
+    field : list[numpy.ndarray / float 2D array]
+        fields on the local grid.
+        
+    lcolfracs : list[bool], optional
+            If col_means[i] == true, mean of field[i] computed 
+            over global column, if false mean computed over the gobal cell.  
+            
+    topo : numpy.ndarray / float 2D array
+        surface elevation on the local grid
+    topo_max : numpy.ndarray / float 1D array
+        elevation class limits
+    local_to_global_map : 2D array with
+        global grid cell ID for each local grid cell
+    global_shape : (int, int, int)
+        shape of the global grid
+
+
+    Returns
+    -------
+    global_field : numpy.ndarray / float 3D array
+        means of input field for each global cell
+
+    """
+
+    if not isinstance(fields, list):
+        raise TypeError('fields must be a list')
+
+    if not isinstance(col_means, list):
+        raise TypeError('lcolfracs must be a list')
+
+    __, nj_global, ni_global = global_shape
+    global_fields = [np.full(global_shape, missing_val) for field in fields]
+
+    def cellid(i_global,j_global):
+        return cell_id(i_global,j_global,ni_global,nj_global)
+
+    for i in range(0, ni_global):
+        for j in range(0, nj_global):
+            indx = mask & (local_to_global_map  == cellid(i,j))
+            for global_field, field, col_mean in \
+                zip(global_fields, fields, col_means):
+                
+                fsum, count, count_col  = local_to_global_cell_agg( \
+                        field, topo, mask, topo_max, indx)
+    
+                if col_mean:
+                    if count_col > 0:
+                        global_field[:, j, i] = fsum/count_col
+                else:
+                    valid = count > 0
+                    global_field[valid, j, i] = fsum[valid]/count[valid]
+
+    return global_fields

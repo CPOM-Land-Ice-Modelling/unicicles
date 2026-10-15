@@ -1,0 +1,17 @@
+tool: flatten
+
+input: /home/users/tm17544/cmip7_workflow_testing_data
+
+output_dir: /home/users/tm17544/cmip7_workflow_testing_data/test_output
+
+# Glob pattern used to find plot files when 'input' is a directory.
+plot_pattern: "*plot-AIS.hdf5"
+
+exe_path: /home/users/tm17544/Code/BISICLES/bisicles-uob/code/filetools/flatten2d.Linux.64.c++.gfortran.DEBUG.OPT.GNU.ex
+
+epsg: 3031
+
+level: 0
+
+calendar: 360_day
+
