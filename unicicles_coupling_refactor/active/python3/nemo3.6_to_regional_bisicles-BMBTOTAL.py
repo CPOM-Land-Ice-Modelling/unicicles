@@ -39,7 +39,12 @@ def parse_commandline():
     if err != 0:
         sys.exit(err)
     output, err = arg_to_file_exist(args.output, io="out", err=err)
-    output_bmbtotal , err = arg_to_file_exist(args.output_bmbtotal, io="out", err=err)
+
+    l_bmbtotal = False
+    output_bmbtotal = "dummy"
+    if args.output_bmbtotal is not None:
+        l_bmbtotal = True
+        output_bmbtotal , err = arg_to_file_exist(args.output_bmbtotal, io="out", err=err)
 
     region = "GrIS"
     if args.region is not None:
@@ -49,12 +54,12 @@ def parse_commandline():
         parser.print_help()
         sys.exit(err)
 
-    return input, output, output_bmbtotal, region
+    return input, output, l_bmbtotal, output_bmbtotal, region
 
 if __name__ == "__main__":
 
     # Read the command line arguments
-    nctgridfile, regrid_hdf5file, bmbtotal_file, region = parse_commandline()
+    nctgridfile, regrid_hdf5file, l_bmbtotal, bmbtotal_file, region = parse_commandline()
 
     regrid_ncfile = os.path.splitext(os.path.basename(regrid_hdf5file))[0] + \
                     ".nc"
@@ -92,14 +97,15 @@ if __name__ == "__main__":
 
     f = cf.read(nemo_ncgridfile)[0]
 
-    #calculate integrated nemo bmb for conservation purposes
-    #THIS IS THE GLOBAL NEMO INTEGRAL. AT SOME POINT WE MAY NEED TO SPLIT THIS FOR THE REGIONS
-    #THAT BISICLES IS MAPPING TO?
-    #nemo_bmbtotal = -1.0e12
-    nemo_xdim = f.coordinate('cell_x_length').array.squeeze()
-    nemo_ydim = f.coordinate('cell_y_length').array.squeeze()
-    nemo_bmbtotal = np.sum(melt_water * nemo_xdim * nemo_ydim) * water_unit_factor
-    print("area integral is: ",nemo_bmbtotal)
+    if l_bmbtotal:
+      #calculate integrated nemo bmb for conservation purposes
+      #THIS IS THE GLOBAL NEMO INTEGRAL. AT SOME POINT WE MAY NEED TO SPLIT THIS FOR THE REGIONS
+      #THAT BISICLES IS MAPPING TO?
+      #nemo_bmbtotal = -1.0e12
+      nemo_xdim = f.coordinate('cell_x_length').array.squeeze()
+      nemo_ydim = f.coordinate('cell_y_length').array.squeeze()
+      nemo_bmbtotal = np.sum(melt_water * nemo_xdim * nemo_ydim) * water_unit_factor
+      print("area integral is: ",nemo_bmbtotal)
 
     g = cf.read(bike_ncgridfile)[0]
 
@@ -180,5 +186,6 @@ if __name__ == "__main__":
         print("ERROR: failed to create HDF file")
         sys.exit(1)
 
-    f = open(bmbtotal_file,'w')
-    print(nemo_bmbtotal, file=f)
+    if l_bmbtotal:
+      f = open(bmbtotal_file,'w')
+      print(nemo_bmbtotal, file=f)
