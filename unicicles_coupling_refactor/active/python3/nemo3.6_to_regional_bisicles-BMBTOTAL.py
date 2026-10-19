@@ -83,7 +83,6 @@ if __name__ == "__main__":
       melt_water = np.ma.filled(melt_water,fill_value=0.)
       melt_heat  = np.ma.filled(melt_heat, fill_value=0.)
 
-
     # Check for array size- we used to optionally do time averaging, but
     # that's now in process_ocean
     if melt_water.ndim == 3:
@@ -91,15 +90,18 @@ if __name__ == "__main__":
               "- have I picked up a 3d volume field by accident?!")
         sys.exit(1)
 
+    f = cf.read(nemo_ncgridfile)[0]
+
+    #calculate integrated nemo bmb for conservation purposes
+    #THIS IS THE GLOBAL NEMO INTEGRAL. AT SOME POINT WE MAY NEED TO SPLIT THIS FOR THE REGIONS
+    #THAT BISICLES IS MAPPING TO?
+    #nemo_bmbtotal = -1.0e12
+    nemo_xdim = f.coordinate('cell_x_length').array.squeeze()
+    nemo_ydim = f.coordinate('cell_y_length').array.squeeze()
+    nemo_bmbtotal = np.sum(melt_water * nemo_xdim * nemo_ydim) * water_unit_factor
+    print("area integral is: ",nemo_bmbtotal)
+
     g = cf.read(bike_ncgridfile)[0]
-
-    #calculate integrated nemo bmb for BISISLCES conservation purposes.
-    #nemo_xdim = g.select_field('e1t').array.squeeze()
-    #nemo_ydim = g.select_field('e2t').array.squeeze()
-    #THESE FIELDS ARE NOT IN OUR CF_GRIDFILE, BUT COULD BE
-    #nemo_bmbtotal = np.sum( melt_water * nemo_xdim * nemo_ydim) * water_unit_factor
-
-    nemo_bmbtotal = -1e12
 
     print(" regridding melt field")
     f = cf.read(nemo_ncgridfile)[0]
@@ -123,10 +125,17 @@ if __name__ == "__main__":
     melt = np.swapaxes(w_regrid.array, 0, 1)
 
     # Do the unit conversion, get rid of any missing data flags in the regridded array
-    heat.fill_value = 0.
-    heat = heat.filled() * heat_unit_factor
-    melt.fill_value = 0.
-    melt = melt.filled() * water_unit_factor
+
+    #replace mask with 0s if it exists
+    if isinstance(melt, np.ma.core.MaskedArray):
+      heat.fill_value = 0.
+      heat = heat.filled()
+
+      melt.fill_value = 0.
+      melt = melt.filled()
+
+    melt = melt * water_unit_factor
+    heat = heat * heat_unit_factor
 
     # Antony Siahaan wrote a clause here that adjusted collections of cells in the 
     # regridded melt field to conserve with respect to the original NEMO cell their
@@ -171,6 +180,5 @@ if __name__ == "__main__":
         print("ERROR: failed to create HDF file")
         sys.exit(1)
 
-    # Create the text file for the conservation amount
     f = open(bmbtotal_file,'w')
     print(nemo_bmbtotal, file=f)
