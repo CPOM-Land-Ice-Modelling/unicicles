@@ -26,13 +26,27 @@ if [ -e $BISICLES_CONFIG ]; then rm $BISICLES_CONFIG; fi
 rose config --file=rose-app-run.conf bisicles_config | rose env-cat >> $BISICLES_CONFIG;
 
 #add the conservation target for the SHELF BMB TO THE NAMELIST
-echo "looking for BMB conservation total at $PREICE_ICE_NEMO_BMBTOTAL"
-if [ -e $PREICE_ICE_NEMO_BMBTOTAL ]; then
-  export NEMO_BMBTOTAL=`cat $PREICE_ICE_NEMO_BMBTOTAL`
-  echo "found  $NEMO_BMBTOTAL to use as a conservation target"
-  echo "basalFlux.known_sum=$NEMO_BMBTOTAL" >> $BISICLES_CONFIG
+if grep -q conservedSum $BISICLES_CONFIG; then
+  echo "BISICLES namelist contains BMB conservation options"
+if grep -q known_sum $BISICLES_CONFIG; then
+  echo "looking for BMB conservation total at $PREICE_ICE_NEMO_BMBTOTAL"
+  if [ -s $PREICE_ICE_NEMO_BMBTOTAL ]; then
+    export NEMO_BMBTOTAL=`cat $PREICE_ICE_NEMO_BMBTOTAL`
+    echo "found  $NEMO_BMBTOTAL to use as a conservation target"
+    sed "s/known_sum=.*/known_sum=${NEMO_BMBTOTAL}/" $BISICLES_CONFIG > temp.namelist
+    mv temp.namelist $BISICLES_CONFIG
+  else  
+    echo "ERROR: unicicles_driver cannot find BMB conservation file or is empty"
+    exit 3
+  fi
+else
+  echo "I don't think I've been asked to look for a NEMO BMB conservation total"
+  echo "ERROR: we don't use these options in UKESM without a separate target value"
+  exit 4
+fi
 fi
 echo " " >> $BISICLES_CONFIG;
+
 
 #construct the INI namelist for glimmer/glint from the rose-app.conf
 if [ -e $GLINT_CONFIG ]; then rm $GLINT_CONFIG; fi
